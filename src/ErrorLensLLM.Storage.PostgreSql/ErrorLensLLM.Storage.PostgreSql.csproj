@@ -1,10 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\ErrorLensLLM.Core\ErrorLensLLM.Core.csproj" />
+    <PackageReference Include="Npgsql" Version="10.0.3" />
   </ItemGroup>
 
-  <PropertyGroup>
-  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ErrorLensLLM.Core\ErrorLensLLM.Core.csproj" />
+  </ItemGroup>
 
 </Project>

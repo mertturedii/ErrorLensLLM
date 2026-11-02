@@ -40,15 +40,32 @@ public class ErrorFingerprinterTests
         Assert.NotEqual(a, b);
     }
 
-    [Fact]
-    public void Async_state_machine_names_are_cleaned()
+    [Theory]
+    [InlineData("Ogrenci.KayitService+<GetKayit>d__4", "MoveNext")]          // async method
+    [InlineData("Ogrenci.KayitService", "<GetKayit>b__0")]                      // lambda
+    [InlineData("Ogrenci.KayitService+<>c__DisplayClass2_0", "<GetKayit>b__1")] // closure
+    public void Compiler_generated_names_resolve_to_the_source_method(string type, string method)
     {
-        var sync = ErrorFingerprinter.Compute("E", "x", [App("Ogrenci.KayitService", "GetKayit", 1)]);
-        var async = ErrorFingerprinter.Compute("E", "x", [App("Ogrenci.KayitService+<GetKayit>d__4", "MoveNext", 1)]);
-        var asyncMethod = ErrorFingerprinter.Compute("E", "x", [App("Ogrenci.KayitService", "<GetKayit>b__0", 1)]);
+        Assert.Equal("Ogrenci.KayitService.GetKayit", ErrorFingerprinter.FrameKey(App(type, method, 1)));
+    }
 
-        Assert.NotEqual(sync, async); // MoveNext vs GetKayit differ; type is cleaned
-        Assert.Equal(sync, asyncMethod);
+    [Fact]
+    public void Local_function_ordinals_do_not_change_fingerprint()
+    {
+        var before = ErrorFingerprinter.Compute("E", "x", [App("X.Svc", "<Run>g__Load|4_0", 1)]);
+        var after = ErrorFingerprinter.Compute("E", "x", [App("X.Svc", "<Run>g__Load|5_0", 1)]);
+
+        Assert.Equal(before, after);
+        Assert.Equal("X.Svc.Run.Load", ErrorFingerprinter.FrameKey(App("X.Svc", "<Run>g__Load|4_0", 1)));
+    }
+
+    [Fact]
+    public void Different_messages_from_the_same_method_get_different_fingerprints()
+    {
+        var notFound = ErrorFingerprinter.Compute("System.InvalidOperationException", "Kayit bulunamadi", [App("A.B", "C", 1)]);
+        var closed = ErrorFingerprinter.Compute("System.InvalidOperationException", "Donem kapali", [App("A.B", "C", 1)]);
+
+        Assert.NotEqual(notFound, closed);
     }
 
     [Fact]

@@ -14,9 +14,9 @@ public sealed partial class SensitiveDataMasker
         var fields = sensitiveFields?.Where(f => !string.IsNullOrWhiteSpace(f)).Select(Regex.Escape).ToArray() ?? [];
         if (fields.Length > 0)
         {
-            // key=value, key: value, "key":"value"
+            // key=value, key: value, "key":"value with spaces"; the key must not be the tail of a longer word
             _fieldRegex = new Regex(
-                $$"""(?<key>"?(?:{{string.Join('|', fields)}})"?\s*[:=]\s*)(?<quote>"?)(?<value>[^",;&\s}]+)""",
+                $$"""(?<key>"?(?<![A-Za-z0-9_])(?:{{string.Join('|', fields)}})"?\s*[:=]\s*)(?:(?<quote>")[^"]*"|[^",;&\s}]+)""",
                 RegexOptions.IgnoreCase | RegexOptions.Compiled);
         }
     }
@@ -31,7 +31,7 @@ public sealed partial class SensitiveDataMasker
         result = PhoneRegex().Replace(result, Mask);
 
         if (_fieldRegex is not null)
-            result = _fieldRegex.Replace(result, m => $"{m.Groups["key"].Value}{m.Groups["quote"].Value}{Mask}");
+            result = _fieldRegex.Replace(result, m => m.Groups["quote"].Success ? $"{m.Groups["key"].Value}\"{Mask}\"" : $"{m.Groups["key"].Value}{Mask}");
 
         return result;
     }

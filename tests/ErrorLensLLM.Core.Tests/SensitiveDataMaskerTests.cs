@@ -19,6 +19,8 @@ public class SensitiveDataMaskerTests
     [Theory]
     [InlineData("password=Gizli123;Host=x", "password=***;Host=x")]
     [InlineData("""{"sifre":"abc","ad":"x"}""", """{"sifre":"***","ad":"x"}""")]
+    [InlineData("""{"password":"gizli kelime 123"}""", """{"password":"***"}""")]
+    [InlineData("oldpassword=x;password=y", "oldpassword=x;password=***")]
     public void Configured_fields_are_masked(string input, string expected)
     {
         Assert.Equal(expected, _masker.MaskText(input));

@@ -5,6 +5,8 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- NU1900: a configured NuGet feed could not be reached for vulnerability data; depends on the network, not the code -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1900</WarningsNotAsErrors>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
 

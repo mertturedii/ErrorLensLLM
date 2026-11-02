@@ -26,10 +26,12 @@ public static partial class MessageNormalizer
     [GeneratedRegex(@"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")]
     private static partial Regex GuidRegex();
 
-    [GeneratedRegex(@"\b\d{1,4}[-./]\d{1,2}[-./]\d{1,4}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?")]
+    // A four-digit year first or last, so that version numbers like 1.2.3 are not dates
+    [GeneratedRegex(@"\b(?:\d{4}[-./]\d{1,2}[-./]\d{1,2}|\d{1,2}[-./]\d{1,2}[-./]\d{4})(?:[ T]\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?")]
     private static partial Regex DateTimeRegex();
 
-    [GeneratedRegex(@"'[^']*'|""[^""]*""")]
+    // A quote only opens after a separator, so Turkish suffix apostrophes (Öğrenci'nin, Ankara'da) are not values
+    [GeneratedRegex(@"(?<=^|[\s=:(\[,])(?:'[^']*'|""[^""]*"")(?=$|[\s,.;:)\]])")]
     private static partial Regex QuotedRegex();
 
     [GeneratedRegex(@"\b0x[0-9a-fA-F]+\b")]
