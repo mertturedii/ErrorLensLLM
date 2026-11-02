@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <!-- Managed bindings only; the host picks the native libtorch package (e.g. TorchSharp-cpu) -->
+    <PackageReference Include="TorchSharp" Version="0.107.0" />
+  </ItemGroup>
+
+</Project>
