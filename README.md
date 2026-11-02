@@ -51,7 +51,17 @@ The test set has 287,531 blocks, of which 6,668 are anomalies.
 | **DeepLog (LSTM, top-g = 9)** | 0.722 | 0.834 | **0.774** |
 
 Full setup and confusion counts: [docs/experiments/hdfs-results.md](docs/experiments/hdfs-results.md).
-DeepLog's hyper-parameters are not tuned yet. The original paper reports an F1 of about 0.96 under a different split.
+
+**DeepLog tuning** ([report](docs/experiments/hdfs-deeplog-tuning.md)). Top-g and the training size are chosen on a validation split
+taken from the training part, never on the test set. The chosen setting is N = 50,000 normal blocks and g = 8, which gives
+**test F1 0.800**. Validation F1 is about 0.93; the gap comes from templates that appear only in the second half of the log
+(4,524 test blocks contain a template never seen in training). The original paper reports F1 ≈ 0.96 under a different split.
+
+**Parsing accuracy** ([report](docs/experiments/hdfs-parsing.md)). Drain's original similarity cannot reach thresholds above
+the share of constant tokens, so at ≥ 0.6 it diverges into thousands of templates. A *constant-token* similarity
+(variables ignored) combined with masking file paths raises grouping accuracy from **0.846 to 0.998** at a threshold of 0.8.
+It separates `PacketResponder … terminating` from `… interrupted`, which the default setting merges. Detection F1 does not change,
+because the merged event occurs only 49 times. A higher parsing accuracy alone does not improve detection.
 
 ### Reproduce
 
@@ -60,11 +70,20 @@ mkdir -p data/HDFS && cd data/HDFS
 curl -L -o HDFS_v1.zip 'https://zenodo.org/records/8196385/files/HDFS_v1.zip?download=1'
 unzip HDFS_v1.zip && cd ../..
 
-dotnet run --project experiments/ErrorLensLLM.Experiments -c Release -- hdfs
+dotnet run --project experiments/ErrorLensLLM.Experiments -c Release -- hdfs         # method comparison
+dotnet run --project experiments/ErrorLensLLM.Experiments -c Release -- hdfs-tune    # DeepLog top-g / training size
+dotnet run --project experiments/ErrorLensLLM.Experiments -c Release -- hdfs-parse   # Drain parsing accuracy
 ```
 
-The first run parses the log with Drain (about 10 s) and caches the sessions in `data/HDFS`. A full run takes about 20 s on an
-Apple M-series CPU. Options: `--train-ratio`, `--epochs`, `--deeplog-sessions`, `--skip-deeplog`, `--report`.
+The first run of each parser setting parses the log with Drain (about 10 s) and caches the sessions in `data/HDFS`.
+On an Apple M-series CPU, `hdfs` takes about 20 s, `hdfs-tune` about 5 min and `hdfs-parse` about 6 min.
+Options are listed at the top of [Program.cs](experiments/ErrorLensLLM.Experiments/Program.cs).
+
+### Local database
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d     # PostgreSQL 17 on 127.0.0.1:5432, data in volume errorlens-pgdata
+```
 
 ## Repository layout
 
@@ -83,7 +102,7 @@ Apple M-series CPU. Options: `--train-ratio`, `--epochs`, `--deeplog-sessions`, 
 ## Roadmap
 
 - [x] Drain, rule baselines, Isolation Forest, DeepLog on HDFS
-- [ ] DeepLog tuning (top-g sweep, training size) and Drain parsing accuracy against the ground-truth templates
+- [x] DeepLog tuning (top-g sweep, training size) and Drain parsing accuracy against the ground-truth templates
 - [ ] Embedding + clustering for grouping similar errors
 - [ ] BGL dataset
 - [ ] Collection pipeline: Serilog / OpenTelemetry → PostgreSQL

@@ -20,8 +20,8 @@ public sealed class LogTemplate
 
     public override string ToString() => $"E{Id}: {Text}";
 
-    /// <summary>Share of positions with an identical (non-wildcard) token, and the template's wildcard count.</summary>
-    internal (double Similarity, int Wildcards) Similarity(string[] tokens)
+    /// <summary>Similarity to a tokenized message, and the template's wildcard count.</summary>
+    internal (double Similarity, int Wildcards) Similarity(string[] tokens, DrainSimilarity mode)
     {
         var same = 0;
         var wildcards = 0;
@@ -33,7 +33,8 @@ public sealed class LogTemplate
                 same++;
         }
 
-        return (_tokens.Length == 0 ? 1.0 : (double)same / _tokens.Length, wildcards);
+        var compared = mode == DrainSimilarity.ConstantTokens ? _tokens.Length - wildcards : _tokens.Length;
+        return (compared == 0 ? 1.0 : (double)same / compared, wildcards);
     }
 
     internal void Merge(string[] tokens)

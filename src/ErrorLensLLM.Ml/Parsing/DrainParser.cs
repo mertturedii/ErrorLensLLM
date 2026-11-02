@@ -15,20 +15,28 @@ public sealed class DrainParser
     private readonly List<LogTemplate> _templates = [];
     private readonly int _prefixTokens;
     private readonly double _similarityThreshold;
+    private readonly DrainSimilarity _similarity;
     private readonly int _maxChildren;
     private readonly Regex[] _maskPatterns;
 
     /// <param name="depth">Tree depth including root, length and leaf layers (paper default 4).</param>
-    /// <param name="similarityThreshold">Minimum share of identical tokens to join an existing template.</param>
+    /// <param name="similarityThreshold">Minimum similarity to join an existing template.</param>
     /// <param name="maxChildren">Max children per internal node; overflow is routed to a wildcard child.</param>
     /// <param name="maskPatterns">Domain regexes (ids, IPs) replaced by the wildcard before parsing.</param>
-    public DrainParser(int depth = 4, double similarityThreshold = 0.5, int maxChildren = 100, IEnumerable<Regex>? maskPatterns = null)
+    /// <param name="similarity">How similarity is measured; see <see cref="DrainSimilarity"/>.</param>
+    public DrainParser(
+        int depth = 4,
+        double similarityThreshold = 0.5,
+        int maxChildren = 100,
+        IEnumerable<Regex>? maskPatterns = null,
+        DrainSimilarity similarity = DrainSimilarity.Original)
     {
         if (depth < 3)
             throw new ArgumentOutOfRangeException(nameof(depth), "Depth must be at least 3.");
 
         _prefixTokens = depth - 3;
         _similarityThreshold = similarityThreshold;
+        _similarity = similarity;
         _maxChildren = maxChildren;
         _maskPatterns = maskPatterns?.ToArray() ?? [];
     }
@@ -116,7 +124,7 @@ public sealed class DrainParser
 
         foreach (var candidate in candidates)
         {
-            var (similarity, wildcards) = candidate.Similarity(tokens);
+            var (similarity, wildcards) = candidate.Similarity(tokens, _similarity);
             if (similarity > bestSimilarity || (similarity == bestSimilarity && wildcards > bestWildcards))
             {
                 best = candidate;
@@ -133,4 +141,19 @@ public sealed class DrainParser
         public Dictionary<string, Node> Children { get; } = new(StringComparer.Ordinal);
         public List<LogTemplate> Templates { get; } = [];
     }
+}
+
+public enum DrainSimilarity
+{
+    /// <summary>
+    /// Paper definition: identical constant tokens / all tokens. Wildcard positions never count as similar, so a
+    /// template with many variables can never reach a high threshold and every message opens a new template.
+    /// </summary>
+    Original,
+
+    /// <summary>
+    /// Identical constant tokens / constant tokens of the template. Variables are ignored, so a high threshold
+    /// separates messages that differ in a single word (e.g. "terminating" vs "interrupted") without exploding.
+    /// </summary>
+    ConstantTokens
 }

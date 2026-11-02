@@ -14,6 +14,9 @@ public sealed record HdfsExperimentOptions
     /// <summary>Sessions are split in log order; the first part is used for training (loglizer default 0.5).</summary>
     public double TrainRatio { get; init; } = 0.5;
 
+    /// <summary>How the log is parsed into templates.</summary>
+    public HdfsParserSettings Parser { get; init; } = new();
+
     /// <summary>Templates seen in fewer training sessions than this share are "rare" for the rule baseline.</summary>
     public double RareTemplateShare { get; init; } = 0.001;
 
@@ -36,7 +39,7 @@ public static class HdfsExperiment
     public static void Run(HdfsExperimentOptions options)
     {
         Console.WriteLine("Loading HDFS...");
-        var (sessions, templates) = HdfsDataset.Load(options.DataDirectory);
+        var (sessions, templates) = HdfsDataset.Load(options.DataDirectory, options.Parser);
 
         var trainCount = (int)(sessions.Count * options.TrainRatio);
         var train = sessions.Take(trainCount).ToList();
@@ -94,7 +97,7 @@ public static class HdfsExperiment
         return test.Select(s => s.Events.Any(id => blocksWithTemplate[id] < minimum)).ToList();
     }
 
-    private static List<bool> IsolationForestDetector(List<HdfsSession> train, List<HdfsSession> test, int templateCount, double contamination)
+    internal static List<bool> IsolationForestDetector(List<HdfsSession> train, List<HdfsSession> test, int templateCount, double contamination)
     {
         var forest = new IsolationForest(treeCount: 100, sampleSize: 256, seed: 42);
         forest.Fit(train.Select(s => CountVector(s, templateCount)).ToList());
@@ -115,25 +118,12 @@ public static class HdfsExperiment
         return test.Select(s => Score(s) > threshold).ToList();
     }
 
-    private static List<bool> DeepLogDetector(List<HdfsSession> train, List<HdfsSession> test, int templateCount, HdfsExperimentOptions options)
+    internal static List<bool> DeepLogDetector(List<HdfsSession> train, List<HdfsSession> test, int templateCount, HdfsExperimentOptions options)
     {
         var normal = train.Where(s => !s.IsAnomaly).Take(options.DeepLogSessions).Select(s => s.Events).ToList();
 
-        // Event ids never seen in training are mapped out of range so that DeepLog flags them
-        var seen = normal.SelectMany(e => e).Distinct().OrderBy(id => id).ToList();
-        var map = seen.Select((id, index) => (id, index)).ToDictionary(p => p.id, p => p.index);
-        int[] Remap(int[] events) => events.Select(id => map.GetValueOrDefault(id, -1)).ToArray();
-
-        using var model = new DeepLog(seen.Count, new DeepLogOptions { Epochs = options.DeepLogEpochs });
-        model.Fit(normal.Select(Remap).ToList(), (epoch, loss) => Console.WriteLine($"  epoch {epoch}: loss {loss:F4}"));
-
-        // Identical sequences are common; predict each distinct one once
-        var distinct = test.Select(s => string.Join(',', s.Events)).Distinct().ToList();
-        var index = distinct.Select((key, i) => (key, i)).ToDictionary(p => p.key, p => p.i);
-        Console.WriteLine($"  scoring {distinct.Count:N0} distinct test sequences");
-        var ranks = model.WorstRanks(distinct.Select(key => Remap(key.Split(',').Select(int.Parse).ToArray())).ToList());
-
-        return test.Select(s => ranks[index[string.Join(',', s.Events)]] >= options.DeepLogTopG).ToList();
+        using var model = new HdfsDeepLog(normal, options.DeepLogEpochs, Console.WriteLine);
+        return model.WorstRanks(test).Select(rank => rank >= options.DeepLogTopG).ToList();
     }
 
     private static double[] CountVector(HdfsSession session, int templateCount)
@@ -157,7 +147,7 @@ public static class HdfsExperiment
         sb.AppendLine("## Setup");
         sb.AppendLine();
         sb.AppendLine("- Dataset: LogHub HDFS_v1, sessions = blocks (`blk_*`), labels from `anomaly_label.csv`");
-        sb.AppendLine($"- Parsing: Drain (depth 4, similarity 0.5, LogHub masks) → {templateCount} templates");
+        sb.AppendLine($"- Parsing: Drain (depth 4, {options.Parser}, LogHub masks) → {templateCount} templates");
         sb.AppendLine($"- Split: chronological by first appearance, train ratio {options.TrainRatio.ToString(inv)}");
         sb.AppendLine($"- Sessions: {sessionCount:N0} total; train {train.Count:N0} ({train.Count(s => s.IsAnomaly):N0} anomalies), " +
                       $"test {test.Count:N0} ({test.Count(s => s.IsAnomaly):N0} anomalies)");

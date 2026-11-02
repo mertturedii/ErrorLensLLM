@@ -52,6 +52,32 @@ public class DrainParserTests
     }
 
     [Fact]
+    public void Original_similarity_cannot_match_variable_heavy_messages_at_high_threshold()
+    {
+        var parser = new DrainParser(similarityThreshold: 0.6, maskPatterns: [new Regex(@"\d+")]);
+
+        // 3 of 7 tokens are variables: even identical messages score 4/7 < 0.6
+        parser.Parse("Receiving block 1 src: 2 dest: 3");
+        parser.Parse("Receiving block 4 src: 5 dest: 6");
+
+        Assert.Equal(2, parser.Templates.Count);
+    }
+
+    [Fact]
+    public void Constant_token_similarity_keeps_variables_out_and_separates_single_word_changes()
+    {
+        var parser = new DrainParser(similarityThreshold: 0.8, maskPatterns: [new Regex(@"\d+")], similarity: DrainSimilarity.ConstantTokens);
+
+        var a = parser.Parse("Receiving block 1 src: 2 dest: 3");
+        var b = parser.Parse("Receiving block 4 src: 5 dest: 6");
+        var terminating = parser.Parse("PacketResponder 1 for block 7 terminating");
+        var interrupted = parser.Parse("PacketResponder 2 for block 8 interrupted");
+
+        Assert.Same(a, b);
+        Assert.NotSame(terminating, interrupted);
+    }
+
+    [Fact]
     public void Match_does_not_learn()
     {
         var parser = new DrainParser();

@@ -1,0 +1,28 @@
+# Local development stack. Start: docker compose -f deploy/docker-compose.yml up -d
+# Data lives in the named volume "errorlens-pgdata" and survives container restarts, re-creation and
+# `docker compose down`. Only `docker compose down -v` (or `docker volume rm errorlens-pgdata`) deletes it.
+name: errorlens
+
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    container_name: errorlens-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: errorlens
+      POSTGRES_USER: errorlens
+      # Local development only; override with ERRORLENS_DB_PASSWORD in deploy/.env
+      POSTGRES_PASSWORD: ${ERRORLENS_DB_PASSWORD:-errorlens_dev}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U errorlens -d errorlens"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
+    name: errorlens-pgdata
