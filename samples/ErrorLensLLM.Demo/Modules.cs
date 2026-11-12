@@ -51,6 +51,13 @@ public static class Modules
                 return Results.Conflict();
             }
 
+            if (options.Value.Has(Faults.OdemeLoggedError) && Random.Shared.NextDouble() < 0.4)
+            {
+                // Version 1.1 treats a bank rejection as a handled case: an error line, a 502, no exception
+                log.LogError("Banka odemeyi reddetti: ogrenci {OgrenciId}, yanit kodu {YanitKodu}", ogrenciId, "E-" + Random.Shared.Next(100, 999));
+                return Results.StatusCode(StatusCodes.Status502BadGateway);
+            }
+
             var referans = await new OdemeService(options.Value).TahsilEtAsync(ogrenciId);
             log.LogInformation("Ogrenci {OgrenciId} odemesi alindi, banka referansi {Referans}", ogrenciId, referans);
             return Results.Ok(new { referans });

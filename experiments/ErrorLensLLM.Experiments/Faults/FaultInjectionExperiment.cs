@@ -7,8 +7,21 @@ using Npgsql;
 
 namespace ErrorLensLLM.Experiments.Faults;
 
-/// <summary>A fault scenario of the demo with its known root cause (the ground truth).</summary>
-public sealed record FaultScenario(string Fault, string Module, string ExceptionType, ErrorCategory Category);
+/// <summary>One action of a scenario, run against the demo in order.</summary>
+public abstract record ScenarioStep;
+
+public sealed record Wait(TimeSpan Duration) : ScenarioStep;
+
+/// <summary>Restarts a module as a new release. With faults, it starts the fault; <paramref name="FaultDelay"/> keeps them dormant for a while.</summary>
+public sealed record Release(string Module, string Version, string[] Faults, TimeSpan FaultDelay = default) : ScenarioStep;
+
+/// <summary>Switches a fault on in a running module, without a release (an external dependency failing).</summary>
+public sealed record EnableFault(string Module, string Fault) : ScenarioStep;
+
+/// <summary>What actually caused the failure; <see cref="DeploymentModule"/> is null when no release did.</summary>
+public sealed record RootCause(string Module, string ExceptionType, ErrorCategory Category, string? DeploymentModule, string? DeploymentVersion);
+
+public sealed record FaultScenario(string Name, string Description, IReadOnlyList<ScenarioStep> Steps, RootCause Truth, bool Hard);
 
 public sealed record FaultInjectionOptions
 {
@@ -20,30 +33,58 @@ public sealed record FaultInjectionOptions
 
     public string Database { get; init; } = "errorlens_eval";
     public int Repetitions { get; init; } = 3;
-    public TimeSpan Baseline { get; init; } = TimeSpan.FromSeconds(20);
-    public TimeSpan FaultDuration { get; init; } = TimeSpan.FromSeconds(40);
     public int AnalysisIntervalSeconds { get; init; } = 2;
+    public IReadOnlyList<FaultScenario> Scenarios { get; init; } = DefaultScenarios(TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(40));
 
-    public IReadOnlyList<FaultScenario> Scenarios { get; init; } =
-    [
-        new("kayit-missing-column", "kayit", "Npgsql.PostgresException", ErrorCategory.DatabaseSchema),
-        new("odeme-bank-timeout", "odeme", "System.TimeoutException", ErrorCategory.Timeout),
-        new("not-null-reference", "not", "System.NullReferenceException", ErrorCategory.CodeDefect)
-    ];
+    public static IReadOnlyList<FaultScenario> DefaultScenarios(TimeSpan baseline, TimeSpan fault)
+    {
+        static RootCause Released(string module, string type, ErrorCategory category) => new(module, type, category, module, "1.1.0");
+
+        return
+        [
+            new("kayit-missing-column", "kayit 1.1.0 reads a column whose migration never ran; not and odeme call kayit",
+                [new Wait(baseline), new Release("kayit", "1.1.0", ["kayit-missing-column"]), new Wait(fault)],
+                Released("kayit", "Npgsql.PostgresException", ErrorCategory.DatabaseSchema), Hard: false),
+            new("odeme-bank-timeout", "odeme 1.1.0: the bank stops answering in time for 40 % of payments",
+                [new Wait(baseline), new Release("odeme", "1.1.0", ["odeme-bank-timeout"]), new Wait(fault)],
+                Released("odeme", "System.TimeoutException", ErrorCategory.Timeout), Hard: false),
+            new("not-null-reference", "not 1.1.0 dereferences a missing elective course",
+                [new Wait(baseline), new Release("not", "1.1.0", ["not-null-reference"]), new Wait(fault)],
+                Released("not", "System.NullReferenceException", ErrorCategory.CodeDefect), Hard: false),
+
+            new("odeme-bank-outage", "the bank goes down while odeme runs; no release is involved",
+                [new Wait(baseline), new EnableFault("odeme", "odeme-bank-timeout"), new Wait(fault)],
+                new RootCause("odeme", "System.TimeoutException", ErrorCategory.Timeout, null, null), Hard: true),
+            new("kayit-delayed-fault", "kayit 1.1.0 fails only 90 s after release; a healthy not 1.0.1 is released in between",
+                [new Wait(baseline), new Release("kayit", "1.1.0", ["kayit-missing-column"], TimeSpan.FromSeconds(90)),
+                 new Wait(TimeSpan.FromSeconds(45)), new Release("not", "1.0.1", []), new Wait(TimeSpan.FromSeconds(45) + fault)],
+                Released("kayit", "Npgsql.PostgresException", ErrorCategory.DatabaseSchema), Hard: true),
+            new("concurrent-releases", "faulty kayit 1.1.0 and a healthy odeme 1.0.1 are released 5 s apart",
+                [new Wait(baseline), new Release("kayit", "1.1.0", ["kayit-missing-column"]), new Wait(TimeSpan.FromSeconds(5)),
+                 new Release("odeme", "1.0.1", []), new Wait(fault)],
+                Released("kayit", "Npgsql.PostgresException", ErrorCategory.DatabaseSchema), Hard: true),
+            new("odeme-logged-error", "odeme 1.1.0 logs bank rejections with LogError and returns 502, throwing nothing",
+                [new Wait(baseline), new Release("odeme", "1.1.0", ["odeme-logged-error"]), new Wait(fault)],
+                Released("odeme", "LoggedError", ErrorCategory.Dependency), Hard: true)
+        ];
+    }
 }
 
 /// <summary>
-/// Measures root cause suggestions against injected faults: for each scenario, runs the demo with normal traffic,
-/// releases the faulty version of one module, and compares the resulting incident with the known cause.
+/// Measures root cause suggestions against injected faults: each scenario runs the demo from an empty database, applies
+/// its steps (waits, releases, runtime faults), and compares the resulting incident with the known cause.
 /// </summary>
 public static class FaultInjectionExperiment
 {
-    private const string FaultyVersion = "1.1.0";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
+    private static readonly Dictionary<string, int> Ports = new() { ["kayit"] = 5101, ["not"] = 5102, ["odeme"] = 5103 };
 
     private sealed record Run(
-        FaultScenario Scenario, int Repetition, int BaselineIncidents, int FaultIncidents, int? TruthRank,
-        bool CategoryCorrect, bool DeploymentCorrect, double? DetectionSeconds, string? Title, int Members, long Occurrences);
+        FaultScenario Scenario, int Repetition, int OtherIncidents, int FaultIncidents, int? TruthRank, bool CategoryCorrect,
+        bool DeploymentCorrect, string? Suspected, double? DetectionSeconds, string? Title, int Members, long Occurrences);
+
+    /// <summary>When the fault became active: a release (plus its delay), or a runtime switch at a known time.</summary>
+    private sealed record FaultStart(Release? Release, DateTimeOffset? At);
 
     public static async Task RunAsync(FaultInjectionOptions options)
     {
@@ -57,25 +98,41 @@ public static class FaultInjectionExperiment
         };
 
         Console.WriteLine("Building collector, dashboard and demo...");
-        await ShellAsync(options.RepositoryRoot, "dotnet", ["build", "src/ErrorLensLLM.Collector", "-c", "Release", "-v", "q", "-nologo"]);
-        await ShellAsync(options.RepositoryRoot, "dotnet", ["build", "src/ErrorLensLLM.Dashboard", "-c", "Release", "-v", "q", "-nologo"]);
-        await ShellAsync(options.RepositoryRoot, "dotnet", ["build", "samples/ErrorLensLLM.Demo", "-c", "Release", "-v", "q", "-nologo"]);
+        foreach (var project in new[] { "src/ErrorLensLLM.Collector", "src/ErrorLensLLM.Dashboard", "samples/ErrorLensLLM.Demo" })
+            await ShellAsync(options.RepositoryRoot, "dotnet", ["build", project, "-c", "Release", "-v", "q", "-nologo"]);
 
+        using var http = new HttpClient();
         var runs = new List<Run>();
         foreach (var scenario in options.Scenarios)
         {
             for (var repetition = 1; repetition <= options.Repetitions; repetition++)
             {
-                Console.WriteLine($"[{scenario.Fault} #{repetition}] fresh database, normal traffic for {options.Baseline.TotalSeconds:F0} s");
+                Console.WriteLine($"[{scenario.Name} #{repetition}] fresh database");
                 await ResetDatabaseAsync(options.ConnectionString, options.Database);
+                FaultStart? faultStart = null;
                 try
                 {
                     await ShellAsync(options.RepositoryRoot, "bash", [script, "start"], environment);
-                    await Task.Delay(options.Baseline);
-
-                    Console.WriteLine($"[{scenario.Fault} #{repetition}] releasing {scenario.Module} {FaultyVersion} with the fault for {options.FaultDuration.TotalSeconds:F0} s");
-                    await ShellAsync(options.RepositoryRoot, "bash", [script, "deploy", scenario.Module, FaultyVersion, scenario.Fault], environment);
-                    await Task.Delay(options.FaultDuration);
+                    foreach (var step in scenario.Steps)
+                    {
+                        Console.WriteLine($"  {step}");
+                        switch (step)
+                        {
+                            case Wait wait:
+                                await Task.Delay(wait.Duration);
+                                break;
+                            case Release release:
+                                string[] extra = release.FaultDelay > TimeSpan.Zero ? [$"--Demo:FaultDelaySeconds={release.FaultDelay.TotalSeconds:F0}"] : [];
+                                await ShellAsync(options.RepositoryRoot, "bash", [script, "deploy", release.Module, release.Version, .. release.Faults, .. extra], environment);
+                                if (release.Faults.Length > 0)
+                                    faultStart = new FaultStart(release, null);
+                                break;
+                            case EnableFault enable:
+                                (await http.PostAsync($"http://localhost:{Ports[enable.Module]}/admin/faults/{enable.Fault}", null)).EnsureSuccessStatusCode();
+                                faultStart = new FaultStart(null, DateTimeOffset.UtcNow);
+                                break;
+                        }
+                    }
 
                     // Let the sinks flush and the analyzer run at least twice more
                     await Task.Delay(TimeSpan.FromSeconds(options.AnalysisIntervalSeconds * 2 + 3));
@@ -85,11 +142,11 @@ public static class FaultInjectionExperiment
                     await ShellAsync(options.RepositoryRoot, "bash", [script, "stop"], environment);
                 }
 
-                var run = await EvaluateAsync(evalConnection, scenario, repetition);
+                var run = await EvaluateAsync(evalConnection, scenario, repetition, faultStart!);
                 runs.Add(run);
-                Console.WriteLine($"  incidents during fault {run.FaultIncidents}, truth rank {run.TruthRank?.ToString() ?? "-"}, " +
-                                  $"category {(run.CategoryCorrect ? "ok" : "wrong")}, deployment {(run.DeploymentCorrect ? "ok" : "wrong")}, " +
-                                  $"detected after {run.DetectionSeconds:F1} s");
+                Console.WriteLine($"  -> incidents {run.FaultIncidents} (+{run.OtherIncidents} other), truth rank {run.TruthRank?.ToString() ?? "-"}, " +
+                                  $"category {(run.CategoryCorrect ? "ok" : "wrong")}, suspected {run.Suspected ?? "none"} " +
+                                  $"({(run.DeploymentCorrect ? "ok" : "wrong")}), detected after {run.DetectionSeconds:F1} s");
             }
         }
 
@@ -100,28 +157,32 @@ public static class FaultInjectionExperiment
         Console.WriteLine(report);
     }
 
-    private static async Task<Run> EvaluateAsync(string connectionString, FaultScenario scenario, int repetition)
+    private static async Task<Run> EvaluateAsync(string connectionString, FaultScenario scenario, int repetition, FaultStart faultStart)
     {
         await using var db = NpgsqlDataSource.Create(connectionString);
 
-        await using var deployCommand = db.CreateCommand(
-            "select id, started_at from deployments where application = $1 and version = $2 order by started_at desc limit 1");
-        deployCommand.Parameters.Add(new() { Value = scenario.Module });
-        deployCommand.Parameters.Add(new() { Value = FaultyVersion });
-        Guid faultyDeployment;
-        DateTimeOffset releasedAt;
-        await using (var reader = await deployCommand.ExecuteReaderAsync())
+        async Task<(Guid Id, DateTimeOffset StartedAt)?> DeploymentAsync(string module, string version)
         {
-            if (!await reader.ReadAsync())
-                throw new InvalidOperationException($"The {scenario.Module} {FaultyVersion} release was not recorded.");
-            (faultyDeployment, releasedAt) = (reader.GetGuid(0), reader.GetFieldValue<DateTimeOffset>(1));
+            await using var command = db.CreateCommand(
+                "select id, started_at from deployments where application = $1 and version = $2 order by started_at desc limit 1");
+            command.Parameters.Add(new() { Value = module });
+            command.Parameters.Add(new() { Value = version });
+            await using var reader = await command.ExecuteReaderAsync();
+            return await reader.ReadAsync() ? (reader.GetGuid(0), reader.GetFieldValue<DateTimeOffset>(1)) : null;
         }
 
+        var started = faultStart.At ?? (await DeploymentAsync(faultStart.Release!.Module, faultStart.Release.Version)
+                                        ?? throw new InvalidOperationException("The faulty release was not recorded.")).StartedAt + faultStart.Release!.FaultDelay;
+        var expected = scenario.Truth.DeploymentModule is { } module ? (await DeploymentAsync(module, scenario.Truth.DeploymentVersion!))?.Id : null;
+
         await using var incidentCommand = db.CreateCommand("""
-            select started_at, created_at, title, category, members::text, suspected_deployment_id, occurrences
-            from incidents where status <> 'merged' order by occurrences desc
+            select i.started_at, i.created_at, i.title, i.category, i.members::text, i.suspected_deployment_id, i.occurrences,
+                   d.application || ' ' || d.version
+            from incidents i left join deployments d on d.id = i.suspected_deployment_id
+            where i.status <> 'merged' order by i.occurrences desc
             """);
-        var incidents = new List<(DateTimeOffset Started, DateTimeOffset Created, string Title, string Category, List<IncidentMember> Members, Guid? Deployment, long Occurrences)>();
+        var incidents = new List<(DateTimeOffset Started, DateTimeOffset Created, string Title, string Category, List<IncidentMember> Members,
+            Guid? Deployment, long Occurrences, string? Suspected)>();
         await using (var reader = await incidentCommand.ExecuteReaderAsync())
         {
             while (await reader.ReadAsync())
@@ -129,25 +190,26 @@ public static class FaultInjectionExperiment
                 incidents.Add((
                     reader.GetFieldValue<DateTimeOffset>(0), reader.GetFieldValue<DateTimeOffset>(1), reader.GetString(2), reader.GetString(3),
                     JsonSerializer.Deserialize<List<IncidentMember>>(reader.GetString(4), Json)!,
-                    reader.IsDBNull(5) ? null : reader.GetGuid(5), reader.GetInt64(6)));
+                    reader.IsDBNull(5) ? null : reader.GetGuid(5), reader.GetInt64(6), reader.IsDBNull(7) ? null : reader.GetString(7)));
             }
         }
 
-        // Errors from the stopping process can precede the release record by a few seconds
-        var cut = releasedAt - TimeSpan.FromSeconds(30);
-        var baseline = incidents.Count(i => i.Started < cut);
+        // Errors of a stopping process can precede the release record by a few seconds
+        var cut = started - TimeSpan.FromSeconds(30);
+        var other = incidents.Count(i => i.Started < cut);
         var fault = incidents.Where(i => i.Started >= cut).ToList();
         if (fault.Count == 0)
-            return new Run(scenario, repetition, baseline, 0, null, false, false, null, null, 0, 0);
+            return new Run(scenario, repetition, other, 0, null, false, false, null, null, null, 0, 0);
 
         var primary = fault[0];
-        var rank = primary.Members.FindIndex(m => m.Application == scenario.Module && m.ExceptionType == scenario.ExceptionType);
+        var rank = primary.Members.FindIndex(m => m.Application == scenario.Truth.Module && m.ExceptionType == scenario.Truth.ExceptionType);
         return new Run(
-            scenario, repetition, baseline, fault.Count,
+            scenario, repetition, other, fault.Count,
             rank >= 0 ? rank + 1 : null,
-            primary.Category == scenario.Category.ToString(),
-            primary.Deployment == faultyDeployment,
-            (primary.Created - releasedAt).TotalSeconds,
+            primary.Category == scenario.Truth.Category.ToString(),
+            primary.Deployment == expected,
+            primary.Suspected,
+            (primary.Created - started).TotalSeconds,
             primary.Title, primary.Members.Count, primary.Occurrences);
     }
 
@@ -180,6 +242,9 @@ public static class FaultInjectionExperiment
     private static string Report(FaultInjectionOptions options, List<Run> runs)
     {
         static string Pct(int part, int whole) => whole == 0 ? "–" : $"{100.0 * part / whole:F0} % ({part}/{whole})";
+        static string Truth(RootCause t) =>
+            $"{t.Module} · {t.ExceptionType[(t.ExceptionType.LastIndexOf('.') + 1)..]} · {t.Category} · " +
+            (t.DeploymentModule is null ? "no release" : $"{t.DeploymentModule} {t.DeploymentVersion}");
 
         var sb = new StringBuilder();
         sb.AppendLine("# Fault injection: root cause suggestions");
@@ -188,49 +253,53 @@ public static class FaultInjectionExperiment
         sb.AppendLine();
         sb.AppendLine("## Protocol");
         sb.AppendLine();
-        sb.AppendLine($"Each run starts from an empty database. The demo (kayit, not, odeme + traffic generator) runs version 1.0.0 with normal traffic for " +
-                      $"{options.Baseline.TotalSeconds:F0} s. Then one module is released as {FaultyVersion} with an injected fault and runs for " +
-                      $"{options.FaultDuration.TotalSeconds:F0} s. The incident analyzer runs every {options.AnalysisIntervalSeconds} s. " +
-                      $"Each scenario is repeated {options.Repetitions} times.");
+        sb.AppendLine("Each run starts from an empty database and the demo (kayit, not, odeme and a traffic generator) at version 1.0.0. " +
+                      $"Then the scenario's steps run: normal traffic, releases, faults. The incident analyzer runs every {options.AnalysisIntervalSeconds} s. " +
+                      $"Each scenario is repeated {options.Repetitions} times. **Basic** scenarios start a continuously triggered fault " +
+                      "right after its release. **Hard** scenarios target known weak spots of the correlator.");
         sb.AppendLine();
-        sb.AppendLine("| Scenario | Injected fault | True root cause |");
-        sb.AppendLine("|---|---|---|");
-        sb.AppendLine("| `kayit-missing-column` | kayit 1.1.0 reads a column whose migration never ran; not and odeme call kayit | kayit · PostgresException · DatabaseSchema |");
-        sb.AppendLine("| `odeme-bank-timeout` | the bank behind odeme stops answering in time for 40 % of payments | odeme · TimeoutException · Timeout |");
-        sb.AppendLine("| `not-null-reference` | not 1.1.0 dereferences a missing elective course | not · NullReferenceException · CodeDefect |");
+        sb.AppendLine("| Scenario | Kind | What happens | True root cause |");
+        sb.AppendLine("|---|---|---|---|");
+        foreach (var s in options.Scenarios)
+            sb.AppendLine($"| `{s.Name}` | {(s.Hard ? "hard" : "basic")} | {s.Description} | {Truth(s.Truth)} |");
         sb.AppendLine();
-        sb.AppendLine("Measures, on the largest incident that started after the release:");
+        sb.AppendLine("Measures, on the largest incident that started after the fault became active:");
         sb.AppendLine("- **Top-1 / Top-3:** the true root cause (module + exception type) is ranked first / within the first three candidates");
-        sb.AppendLine("- **Category / deployment:** the incident's category and suspected deployment match the injected fault");
-        sb.AppendLine("- **Incidents per fault:** how many incidents the release produced (ideal: 1); **false alarms:** incidents during normal traffic");
-        sb.AppendLine("- **Detection time:** from the faulty process start to the incident first being stored");
+        sb.AppendLine("- **Category:** the incident's category matches the fault");
+        sb.AppendLine("- **Deployment:** the suspected deployment is the faulty release, or there is none when no release caused the fault");
+        sb.AppendLine("- **Incidents per fault:** incidents that started once the fault was active (ideal: 1)");
+        sb.AppendLine("- **Other incidents:** incidents before the fault, e.g. errors while a healthy release restarts a service");
+        sb.AppendLine("- **Detection time:** from the fault becoming active to the incident first being stored");
         sb.AppendLine();
         sb.AppendLine("## Results");
         sb.AppendLine();
-        sb.AppendLine("| Scenario | Top-1 | Top-3 | Category | Deployment | Incidents per fault | False alarms | Median detection |");
+        sb.AppendLine("| Scenario | Top-1 | Top-3 | Category | Deployment | Incidents per fault | Other incidents | Median detection |");
         sb.AppendLine("|---|---|---|---|---|---|---|---|");
 
-        foreach (var group in runs.GroupBy(r => r.Scenario.Fault).Append(runs.GroupBy(_ => "**All**").Single()))
+        var groups = runs.GroupBy(r => $"`{r.Scenario.Name}`").ToList();
+        groups.Add(runs.Where(r => !r.Scenario.Hard).GroupBy(_ => "**Basic**").SingleOrDefault()!);
+        groups.Add(runs.Where(r => r.Scenario.Hard).GroupBy(_ => "**Hard**").SingleOrDefault()!);
+        foreach (var group in groups.Where(g => g is not null))
         {
             var list = group.ToList();
             var detection = list.Where(r => r.DetectionSeconds is not null).Select(r => r.DetectionSeconds!.Value).Order().ToList();
-            var median = detection.Count == 0 ? "–" : $"{detection[detection.Count / 2]:F1} s";
             sb.AppendLine(
-                $"| {(group.Key.StartsWith('*') ? group.Key : $"`{group.Key}`")} | {Pct(list.Count(r => r.TruthRank == 1), list.Count)} " +
-                $"| {Pct(list.Count(r => r.TruthRank is <= 3), list.Count)} | {Pct(list.Count(r => r.CategoryCorrect), list.Count)} " +
-                $"| {Pct(list.Count(r => r.DeploymentCorrect), list.Count)} | {list.Average(r => r.FaultIncidents):F1} " +
-                $"| {list.Sum(r => r.BaselineIncidents)} | {median} |");
+                $"| {group.Key} | {Pct(list.Count(r => r.TruthRank == 1), list.Count)} | {Pct(list.Count(r => r.TruthRank is <= 3), list.Count)} " +
+                $"| {Pct(list.Count(r => r.CategoryCorrect), list.Count)} | {Pct(list.Count(r => r.DeploymentCorrect), list.Count)} " +
+                $"| {list.Average(r => r.FaultIncidents):F1} | {list.Sum(r => r.OtherIncidents)} " +
+                $"| {(detection.Count == 0 ? "–" : $"{detection[detection.Count / 2]:F1} s")} |");
         }
 
         sb.AppendLine();
         sb.AppendLine("## Runs");
         sb.AppendLine();
-        sb.AppendLine("| Scenario | # | Incident | Groups | Errors | True cause rank | Category | Deployment | Detected after |");
+        sb.AppendLine("| Scenario | # | Incident | Groups | Errors | True cause rank | Category | Suspected deployment | Detected after |");
         sb.AppendLine("|---|---|---|---|---|---|---|---|---|");
         foreach (var r in runs)
         {
-            sb.AppendLine($"| `{r.Scenario.Fault}` | {r.Repetition} | {r.Title ?? "no incident"} | {r.Members} | {r.Occurrences:N0} " +
-                          $"| {r.TruthRank?.ToString() ?? "–"} | {(r.CategoryCorrect ? "✓" : "✗")} | {(r.DeploymentCorrect ? "✓" : "✗")} " +
+            sb.AppendLine($"| `{r.Scenario.Name}` | {r.Repetition} | {r.Title ?? "no incident"} | {r.Members} | {r.Occurrences:N0} " +
+                          $"| {r.TruthRank?.ToString() ?? "–"} | {(r.CategoryCorrect ? "✓" : "✗")} " +
+                          $"| {r.Suspected ?? "none"} {(r.DeploymentCorrect ? "✓" : "✗")} " +
                           $"| {(r.DetectionSeconds is { } s ? $"{s:F1} s" : "–")} |");
         }
 

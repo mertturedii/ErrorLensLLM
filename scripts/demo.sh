@@ -4,7 +4,7 @@
 #   scripts/demo.sh start                          collector + dashboard + kayit/not/odeme 1.0.0 + traffic
 #   scripts/demo.sh collector                      collector (ingestion + incident analysis) + dashboard
 #   Dashboard: http://localhost:5200
-#   scripts/demo.sh deploy <module> <version> [fault...]   restart one module as a new release
+#   scripts/demo.sh deploy <module> <version> [fault|--option=value...]   restart one module as a new release
 #   scripts/demo.sh status | stop
 #
 # Example incident: scripts/demo.sh deploy kayit 1.1.0 kayit-missing-column
@@ -89,7 +89,11 @@ case "${1:-}" in
   deploy)
     module=${2:?module}; version=${3:?version}; shift 3
     args=(--Demo:Version="$version")
-    i=0; for fault in "$@"; do args+=("--Demo:Faults:$i=$fault"); i=$((i + 1)); done
+    # Plain words are faults; --options (e.g. --Demo:FaultDelaySeconds=90) pass through unchanged
+    i=0
+    for arg in "$@"; do
+      if [[ $arg == --* ]]; then args+=("$arg"); else args+=("--Demo:Faults:$i=$arg"); i=$((i + 1)); fi
+    done
     run "$module" "${args[@]}"
     ;;
   status)

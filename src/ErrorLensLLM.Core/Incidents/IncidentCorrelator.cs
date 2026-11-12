@@ -30,9 +30,10 @@ public sealed record CorrelationOptions
 /// <para>
 /// Two error groups are linked when (a) their errors occur in the same distributed trace, or (b) both start within
 /// <see cref="CorrelationOptions.CoOnsetWindow"/> of each other, shortly after the same deployment. Connected groups
-/// form one incident. The last deployment before the incident is its suspected trigger. Each member is scored on
-/// three signals: how often its error comes first in shared traces (it is upstream of the others), whether it belongs
-/// to the suspected deployment's application, and how early it started relative to the other members.
+/// form one incident. Each member is scored on three signals: how often its error comes first in shared traces (it is
+/// upstream of the others), how early it started relative to the other members, and whether a release of its
+/// application shortly preceded it. The release is looked up for the member that leads on the first two signals, so a
+/// release of an unrelated service at the same time is not blamed; restarts without a version change never are.
 /// </para>
 /// </summary>
 public sealed class IncidentCorrelator(CorrelationOptions? options = null)
@@ -84,7 +85,6 @@ public sealed class IncidentCorrelator(CorrelationOptions? options = null)
         var members = new HashSet<string>(fingerprints);
         var start = fingerprints.Min(f => onset[f]);
         var span = (fingerprints.Max(f => onset[f]) - start).TotalSeconds;
-        var suspected = PrecedingDeployment(deployments, start);
 
         // Traces that cross members of this incident: who failed first in each?
         var first = new Dictionary<string, int>();
@@ -96,36 +96,48 @@ public sealed class IncidentCorrelator(CorrelationOptions? options = null)
             first[chain[0].Fingerprint] = first.GetValueOrDefault(chain[0].Fingerprint) + 1;
         }
 
+        // Signals that do not depend on deployments
+        var upstream = new Dictionary<string, double>();
+        var early = new Dictionary<string, double>();
+        foreach (var fingerprint in fingerprints)
+        {
+            // Without shared traces there is no direction to read, so the signal stays neutral
+            upstream[fingerprint] = involved.TryGetValue(fingerprint, out var count) ? (double)first.GetValueOrDefault(fingerprint) / count : 0.5;
+            early[fingerprint] = span <= 0 ? 1.0 : 1 - (onset[fingerprint] - start).TotalSeconds / span;
+        }
+
+        // The release to suspect is the one of the service the failure starts from, not simply the latest one:
+        // a healthy release of a caller at the same time would otherwise take the blame
+        var leader = fingerprints
+            .OrderByDescending(f => _options.UpstreamWeight * upstream[f] + _options.OnsetWeight * early[f])
+            .ThenBy(f => onset[f])
+            .First();
+        var leaderApp = groups[leader][0].Application;
+        var suspected = PrecedingDeployment(deployments.Where(d => d.IsRelease && d.Application == leaderApp).ToList(), onset[leader]);
+
         var scored = fingerprints.Select(fingerprint =>
         {
             var samples = groups[fingerprint];
             var head = samples[0];
             var evidence = new List<string>();
 
-            // Without shared traces there is no direction to read, so the signal stays neutral
-            var upstream = 0.5;
             if (involved.TryGetValue(fingerprint, out var count))
-            {
-                upstream = (double)first.GetValueOrDefault(fingerprint) / count;
                 evidence.Add($"Paylaşılan {count} izin (trace) {first.GetValueOrDefault(fingerprint)} tanesinde zincirdeki ilk hata bu");
-            }
 
-            // Only the last deployment before the incident is suspected; older ones in the window are not blamed
             var deployed = 0.0;
             if (suspected is not null && suspected.Application == head.Application)
             {
                 var gap = onset[fingerprint] - suspected.StartedAt;
                 deployed = Math.Clamp(1 - gap / _options.DeploymentWindow, 0, 1);
                 evidence.Add(gap < TimeSpan.Zero
-                    ? $"{head.Application} {suspected.Version} deploy'u sırasında başladı"
-                    : $"{head.Application} {suspected.Version} deploy'undan {Seconds(gap)} sonra başladı");
+                    ? $"{head.Application} {suspected.Version} sürümü yayınlanırken başladı"
+                    : $"{head.Application} {suspected.Version} sürümünün yayınından {Seconds(gap)} sonra başladı");
             }
 
-            var early = span <= 0 ? 1.0 : 1 - (onset[fingerprint] - start).TotalSeconds / span;
             if (onset[fingerprint] == start)
                 evidence.Add("Olaydaki ilk hata grubu");
 
-            var score = _options.UpstreamWeight * upstream + _options.DeploymentWeight * deployed + _options.OnsetWeight * early;
+            var score = _options.UpstreamWeight * upstream[fingerprint] + _options.DeploymentWeight * deployed + _options.OnsetWeight * early[fingerprint];
             return new IncidentMember(
                 fingerprint[..fingerprint.IndexOf('#')], head.Application, head.ExceptionType, head.NormalizedMessage, head.TopFrame,
                 ErrorCategorizer.Categorize(head.ExceptionType, head.NormalizedMessage),

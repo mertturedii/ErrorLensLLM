@@ -132,11 +132,14 @@ Every 10 seconds the collector correlates the errors of the last hour into incid
   when both start within 60 s of each other shortly after the same deployment. The second case catches callers that
   only see "connection refused" while a service restarts. An error group that returns after 15 quiet minutes starts
   a new episode, and can therefore start a new incident.
-- **Suspected trigger.** The last deployment shortly before the incident started.
+- **Suspected trigger.** The most recent release (a deployment that changed the version) of the service the failure
+  starts from, within 5 min before its first error. That service leads on trace order and onset; see the evaluation
+  below for why it is not simply the latest deployment.
 - **Root cause score** of each member, with the evidence behind it:
   0.5 × *upstream* (share of shared traces in which its error comes first) +
-  0.3 × *deployment* (it belongs to the suspected deployment's application, decaying over 5 min) +
+  0.3 × *release* (it belongs to the suspected release's application, decaying over 5 min) +
   0.2 × *onset* (how early it started within the incident).
+- **Logged-only errors.** An `Error`/`Fatal` log without an exception is grouped by application and message template.
 - **Category.** Rule-based, from the exception type and message: database schema, database, dependency, timeout,
   code defect, validation, authorization, configuration.
 
@@ -147,17 +150,47 @@ deployment". The HTTP errors in `not` and `odeme` score 0–0.08 and are classif
 
 ## Evaluation with fault injection
 
-`dotnet run --project experiments/ErrorLensLLM.Experiments -c Release -- faults` releases each demo fault
-(`kayit-missing-column`, `odeme-bank-timeout`, `not-null-reference`) several times against a fresh database
-(`errorlens_eval`; the development database is not touched). It then compares the resulting incident with the known root
-cause. Top-1 / Top-3 accuracy, category, suspected deployment, incidents per fault, false alarms during normal traffic and
-detection time are written to [docs/experiments/fault-injection.md](docs/experiments/fault-injection.md).
+`dotnet run --project experiments/ErrorLensLLM.Experiments -c Release -- faults` runs each scenario three times against a
+fresh database (`errorlens_eval`; the development database is not touched). Each run compares the resulting incident
+with the known root cause. Three **basic** scenarios release a module with a continuously triggered fault. Four **hard**
+scenarios target known weak spots:
 
-**Limitations.** The scenarios were written together with the correlator and are favorable to it: each fault is triggered
-continuously, right after a release, in a small system with three services. They show that the pipeline works end to
-end, not how often it is right in production. Missing cases include faults without a release (an external service going
-down), faults that surface minutes after a release, several releases landing together, and errors that are only
-logged, never thrown. The developer feedback stored by the dashboard is meant to measure accuracy on real incidents.
+| Hard scenario | What happens |
+|---|---|
+| `odeme-bank-outage` | the bank goes down while odeme runs; no release is involved |
+| `kayit-delayed-fault` | kayit 1.1.0 fails only 90 s after release; a healthy not 1.0.1 is released in between |
+| `concurrent-releases` | the faulty kayit 1.1.0 and a healthy odeme 1.0.1 are released 5 s apart |
+| `odeme-logged-error` | odeme 1.1.0 logs bank rejections with `LogError` and throws nothing |
+
+Full results: [v1 on the hard scenarios](docs/experiments/fault-injection-v1-hard.md) and
+[v2 on all scenarios](docs/experiments/fault-injection.md).
+
+| Hard scenarios (12 runs) | Top-1 | Category | Suspected deployment |
+|---|---|---|---|
+| v1: blame the last deployment before the incident | 6/12 | 6/12 | **0/12** |
+| v2: releases only, looked up for the leading service | **12/12** | 9/12 | **12/12** |
+
+v1 blamed the services' startup for the outage, and the healthy release in between for the delayed fault. When two
+releases landed together, it ranked a caller above the real cause. It opened no incident for logged-only errors. v2
+makes three changes:
+
+1. A deployment that does not change the version (a restart, or the first one seen) is not a release and is never suspected.
+2. The suspected release is the one of the service the failure starts from. That service is chosen by trace order and
+   onset before deployments are considered, not simply the latest release.
+3. Error-level logs without an exception are grouped by application and template, with the logger's category as the
+   code location.
+
+All three basic scenarios stayed at 9/9 on every measure. The median detection time is 2.4 s, with the analyzer running
+every 2 s.
+
+**Limitations.**
+
+- The v2 changes were made after seeing the hard scenarios, so their 12/12 shows that these weaknesses are fixed. It
+  does not estimate accuracy on new kinds of failures; that needs scenarios written independently of the correlator,
+  or the developer feedback the dashboard collects.
+- The category of a logged-only error stays wrong (*Unknown* instead of a dependency failure). There is no exception
+  type to go on, and a keyword rule written for this one message would only inflate the score.
+- All scenarios run in a three-service demo with steady synthetic traffic.
 
 ## Dashboard
 

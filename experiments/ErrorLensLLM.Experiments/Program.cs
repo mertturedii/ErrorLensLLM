@@ -12,6 +12,7 @@ using ErrorLensLLM.Ml.Parsing;
 //              [--modes original,constanttokens] [--mask-paths false,true]
 //              [--skip-detection]
 //   faults     [--report docs/experiments/fault-injection.md] [--repetitions 3] [--baseline 20] [--fault 40]
+//              [--scenarios kayit-missing-column,odeme-bank-outage,...]
 //              needs PostgreSQL (deploy/docker-compose.yml); uses its own database errorlens_eval and ports 5025-5200
 //   hdfs and hdfs-tune accept --similarity <threshold> (default 0.5), --similarity-mode <original|constanttokens>
 //   and --mask-paths to choose how Drain parses the log.
@@ -88,8 +89,10 @@ switch (args.FirstOrDefault())
         {
             ReportPath = Option("--report") ?? defaults.ReportPath,
             Repetitions = IntOption("--repetitions") ?? defaults.Repetitions,
-            Baseline = IntOption("--baseline") is { } baseline ? TimeSpan.FromSeconds(baseline) : defaults.Baseline,
-            FaultDuration = IntOption("--fault") is { } fault ? TimeSpan.FromSeconds(fault) : defaults.FaultDuration
+            Scenarios = FaultInjectionOptions
+                .DefaultScenarios(TimeSpan.FromSeconds(IntOption("--baseline") ?? 20), TimeSpan.FromSeconds(IntOption("--fault") ?? 40))
+                .Where(s => Option("--scenarios") is not { } names || names.Split(',').Contains(s.Name))
+                .ToList()
         });
         return 0;
     }

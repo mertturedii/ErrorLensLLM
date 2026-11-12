@@ -10,8 +10,8 @@ public class IncidentCorrelatorTests
     private static ErrorSample Sample(string fingerprint, string app, string type, int second, string? trace = null, string message = "m") =>
         new(fingerprint, app, type, message, $"{app}.Frame", T0.AddSeconds(second), trace);
 
-    private static DeploymentInfo Deploy(string app, string version, int second) =>
-        new(Guid.NewGuid(), app, version, null, T0.AddSeconds(second));
+    private static DeploymentInfo Deploy(string app, string version, int second, string? previous = null) =>
+        new(Guid.NewGuid(), app, version, null, T0.AddSeconds(second), previous);
 
     /// <summary>The demo incident: kayit 1.1.0 reads a missing column; not and odeme fail through it.</summary>
     private static (List<ErrorSample>, List<DeploymentInfo>) FaultyKayitRelease()
@@ -19,7 +19,7 @@ public class IncidentCorrelatorTests
         var deployments = new List<DeploymentInfo>
         {
             Deploy("kayit", "1.0.0", -600), Deploy("not", "1.0.0", -600), Deploy("odeme", "1.0.0", -600),
-            Deploy("kayit", "1.1.0", 0)
+            Deploy("kayit", "1.1.0", 0, previous: "1.0.0")
         };
 
         var samples = new List<ErrorSample>
@@ -63,7 +63,7 @@ public class IncidentCorrelatorTests
         var root = _correlator.Correlate(samples, deployments)[0].RootCause;
 
         Assert.Contains(root.Evidence, e => e.Contains("zincirdeki ilk hata"));
-        Assert.Contains(root.Evidence, e => e.Contains("kayit 1.1.0 deploy'undan"));
+        Assert.Contains(root.Evidence, e => e.Contains("kayit 1.1.0 sürümünün yayınından"));
     }
 
     [Fact]
@@ -99,7 +99,7 @@ public class IncidentCorrelatorTests
         var incident = _correlator.Correlate(samples, deployments)[0];
 
         // not and odeme 1.0.0 were deployed 10 minutes earlier, outside the window; kayit 1.1.0 is the last one
-        Assert.DoesNotContain(incident.Members.Where(m => m.Application != "kayit"), m => m.Evidence.Any(e => e.Contains("deploy")));
+        Assert.DoesNotContain(incident.Members.Where(m => m.Application != "kayit"), m => m.Evidence.Any(e => e.Contains("sürüm")));
     }
 
     [Fact]
@@ -122,14 +122,53 @@ public class IncidentCorrelatorTests
         var (first, deployments) = FaultyKayitRelease();
         // The same faulty release is deployed again 30 minutes later
         var later = TimeSpan.FromMinutes(30);
-        var second = first.Select(s => s with { Timestamp = s.Timestamp + later, TraceId = s.TraceId + "-b" }).ToList();
-        deployments.Add(new DeploymentInfo(Guid.NewGuid(), "kayit", "1.1.0", null, T0 + later));
+        var second = first.Select(s => s with { Timestamp = s.Timestamp + later, TraceId = s.TraceId is null ? null : s.TraceId + "-b" }).ToList();
+        deployments.Add(new DeploymentInfo(Guid.NewGuid(), "kayit", "1.1.0", null, T0 + later, "1.0.0"));
 
         var incidents = _correlator.Correlate([.. first, .. second], deployments);
 
         Assert.Equal(2, incidents.Count);
         Assert.All(incidents, i => Assert.Equal(("pg", 5), (i.RootCause.Fingerprint, i.Members.Count)));
         Assert.Equal(T0.AddSeconds(-2) + later, incidents[0].StartedAt);
+    }
+
+    [Fact]
+    public void Healthy_release_of_a_caller_at_the_same_time_is_not_blamed()
+    {
+        var (samples, deployments) = FaultyKayitRelease();
+        deployments.Add(Deploy("odeme", "1.0.1", 5, previous: "1.0.0"));
+
+        var incident = _correlator.Correlate(samples, deployments)[0];
+
+        Assert.Equal("pg", incident.RootCause.Fingerprint);
+        Assert.Equal(("kayit", "1.1.0"), (incident.SuspectedDeployment!.Application, incident.SuspectedDeployment.Version));
+    }
+
+    [Fact]
+    public void Release_whose_fault_surfaces_later_is_still_found_past_a_release_in_between()
+    {
+        var (samples, _) = FaultyKayitRelease();
+        // kayit 1.1.0 went out 90 s before its errors; a healthy not 1.0.1 went out 45 s before them
+        List<DeploymentInfo> deployments = [Deploy("kayit", "1.1.0", -90, previous: "1.0.0"), Deploy("not", "1.0.1", -45, previous: "1.0.0")];
+
+        var incident = _correlator.Correlate(samples.Where(s => !s.Fingerprint.StartsWith("refused")).ToList(), deployments)[0];
+
+        Assert.Equal("pg", incident.RootCause.Fingerprint);
+        Assert.Equal(("kayit", "1.1.0"), (incident.SuspectedDeployment!.Application, incident.SuspectedDeployment.Version));
+        Assert.Contains(incident.RootCause.Evidence, e => e.StartsWith("kayit 1.1.0 sürümünün yayınından"));
+    }
+
+    [Fact]
+    public void Restarts_and_first_deployments_are_not_releases()
+    {
+        // The bank failed 20 s after the services started; nothing new was shipped
+        var samples = Enumerable.Range(0, 5).Select(i => Sample("bank", "odeme", "System.TimeoutException", 20 + i)).ToList();
+        List<DeploymentInfo> deployments = [Deploy("odeme", "1.0.0", 0), Deploy("odeme", "1.0.0", 10, previous: "1.0.0")];
+
+        var incident = Assert.Single(_correlator.Correlate(samples, deployments));
+
+        Assert.Null(incident.SuspectedDeployment);
+        Assert.DoesNotContain(incident.RootCause.Evidence, e => e.Contains("sürüm"));
     }
 
     [Theory]

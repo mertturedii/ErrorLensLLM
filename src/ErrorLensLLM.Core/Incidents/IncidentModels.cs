@@ -10,7 +10,15 @@ public sealed record ErrorSample(
     DateTimeOffset Timestamp,
     string? TraceId);
 
-public sealed record DeploymentInfo(Guid Id, string Application, string? Version, string? CommitSha, DateTimeOffset StartedAt);
+/// <summary>A process start of an application; <c>PreviousVersion</c> is the version of its previous one (null for the first seen).</summary>
+public sealed record DeploymentInfo(Guid Id, string Application, string? Version, string? CommitSha, DateTimeOffset StartedAt, string? PreviousVersion = null)
+{
+    /// <summary>
+    /// A deployment that changed the version. Restarts and the first deployment seen of an application are not
+    /// releases: nothing new was shipped, so they are never suspected of causing an incident.
+    /// </summary>
+    public bool IsRelease => PreviousVersion is not null && PreviousVersion != Version;
+}
 
 /// <summary>One error group's part in an incident, with the evidence behind its root cause score.</summary>
 public sealed record IncidentMember(

@@ -59,6 +59,24 @@ public class IngestPipelineTests
     }
 
     [Fact]
+    public void Error_logs_without_an_exception_are_grouped_by_application_and_template()
+    {
+        IngestLogEvent Rejected(string app, string id) => Log($"Banka odemeyi reddetti: ogrenci {id}", template: "Banka odemeyi reddetti: ogrenci {OgrenciId}") with
+        {
+            Level = "Error",
+            Properties = new Dictionary<string, string> { ["SourceContext"] = "Demo.OdemeService" }
+        };
+
+        var odeme = _pipeline.Prepare(Batch(Rejected("odeme", "4"), Rejected("odeme", "9"), Log("Odeme alindi") with { Level = "Warning" }));
+
+        Assert.Equal(2, odeme.Errors.Count);
+        Assert.Equal(odeme.Events[0].Row.Fingerprint, odeme.Events[1].Row.Fingerprint);
+        Assert.Null(odeme.Events[2].Row.Fingerprint);
+        Assert.Equal((IngestPipeline.LoggedError, "Demo.OdemeService"), (odeme.Errors[0].ExceptionType, odeme.Errors[0].TopFrame));
+        Assert.Equal(IngestPipeline.LoggedError, odeme.Events[0].Row.ExceptionType);
+    }
+
+    [Fact]
     public void Sensitive_properties_are_masked_whole()
     {
         var e = Log("x") with { Properties = new Dictionary<string, string> { ["UserPassword"] = "abc", ["Email"] = "a@b.co", ["Donem"] = "2026-Bahar" } };

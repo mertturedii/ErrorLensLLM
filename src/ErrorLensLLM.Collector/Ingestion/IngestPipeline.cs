@@ -21,6 +21,9 @@ public sealed record PreparedBatch(IReadOnlyList<PreparedEvent> Events, IReadOnl
 /// </summary>
 public sealed partial class IngestPipeline
 {
+    /// <summary>Exception type recorded for error-level logs that carry no exception.</summary>
+    public const string LoggedError = "LoggedError";
+
     public const int MaxMessageLength = 8_000;
     public const int MaxStackTraceLength = 32_000;
 
@@ -70,6 +73,15 @@ public sealed partial class IngestPipeline
                 var topFrame = exception.Frames.FirstOrDefault(f => f.IsApplicationCode) is { } frame ? ErrorFingerprinter.FrameKey(frame) : null;
                 errors.Add(new ErrorOccurrence(fingerprint, exception.Type, normalized, topFrame, source.Application, timestamp));
             }
+            else if (e.Level is "Error" or "Fatal")
+            {
+                // A failure that is only written to the log: group it by application and template, since there are no
+                // stack frames; the logger's category (Serilog SourceContext) stands in for the code location
+                var template = MessageNormalizer.Normalize(templateText);
+                fingerprint = ErrorFingerprinter.Compute(LoggedError, $"{source.Application}: {template}", []);
+                var logger = e.Properties?.GetValueOrDefault("SourceContext");
+                errors.Add(new ErrorOccurrence(fingerprint, LoggedError, template, logger, source.Application, timestamp));
+            }
 
             var row = new LogEventRow
             {
@@ -83,7 +95,7 @@ public sealed partial class IngestPipeline
                 PropertiesJson = MaskProperties(e.Properties),
                 TraceId = e.TraceId,
                 SpanId = e.SpanId,
-                ExceptionType = e.Exception?.Type,
+                ExceptionType = e.Exception?.Type ?? (fingerprint is null ? null : LoggedError),
                 ExceptionMessage = exceptionMessage,
                 StackTrace = stackTrace,
                 Fingerprint = fingerprint

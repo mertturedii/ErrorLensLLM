@@ -6,6 +6,7 @@ using Serilog;
 // A small student information system split into modules, each run as its own process:
 //   dotnet run --project samples/ErrorLensLLM.Demo -- --Demo:Module=kayit --urls http://localhost:5101
 // A release with a fault: --Demo:Version=1.1.0 --Demo:Faults:0=kayit-missing-column (see Faults)
+// A fault that starts later: add --Demo:FaultDelaySeconds=90; a fault without a release: POST /admin/faults/{name}
 
 var builder = WebApplication.CreateBuilder(args);
 var demo = builder.Configuration.GetSection(DemoOptions.Section).Get<DemoOptions>() ?? new DemoOptions();
@@ -48,5 +49,9 @@ switch (demo.Module)
     default: throw new InvalidOperationException($"Unknown module '{demo.Module}'. Use kayit, not, odeme or traffic.");
 }
 
-app.MapGet("/health", () => Results.Ok(new { module = demo.Module, version = demo.Version, faults = demo.Faults }));
+app.MapGet("/health", () => Results.Ok(new { module = demo.Module, version = demo.Version, faults = demo.Faults, runtimeFaults = DemoOptions.RuntimeFaults.Keys }));
+
+// Switch a fault on or off without a release, e.g. an external service going down
+app.MapPost("/admin/faults/{name}", (string name) => { DemoOptions.RuntimeFaults[name] = true; return Results.NoContent(); });
+app.MapDelete("/admin/faults/{name}", (string name) => { DemoOptions.RuntimeFaults.TryRemove(name, out _); return Results.NoContent(); });
 app.Run();

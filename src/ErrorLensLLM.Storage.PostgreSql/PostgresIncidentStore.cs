@@ -83,8 +83,12 @@ public sealed class PostgresIncidentStore(NpgsqlDataSource dataSource)
 
     public async Task<IReadOnlyList<DeploymentInfo>> LoadDeploymentsAsync(DateTimeOffset since, CancellationToken ct = default)
     {
-        await using var command = dataSource.CreateCommand(
-            "select id, application, version, commit_sha, started_at from deployments where started_at >= $1");
+        // The previous version is looked up over all history, so a release at the window's edge is still recognized
+        await using var command = dataSource.CreateCommand("""
+            select id, application, version, commit_sha, started_at, previous_version from (
+                select d.*, lag(version) over (partition by application order by started_at) as previous_version from deployments d
+            ) d where started_at >= $1
+            """);
         command.Parameters.Add(new() { Value = since.ToUniversalTime() });
 
         var deployments = new List<DeploymentInfo>();
@@ -95,7 +99,8 @@ public sealed class PostgresIncidentStore(NpgsqlDataSource dataSource)
                 reader.GetGuid(0), reader.GetString(1),
                 reader.IsDBNull(2) ? null : reader.GetString(2),
                 reader.IsDBNull(3) ? null : reader.GetString(3),
-                reader.GetFieldValue<DateTimeOffset>(4)));
+                reader.GetFieldValue<DateTimeOffset>(4),
+                reader.IsDBNull(5) ? null : reader.GetString(5)));
         }
 
         return deployments;
