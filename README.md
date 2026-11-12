@@ -85,6 +85,45 @@ Options are listed at the top of [Program.cs](experiments/ErrorLensLLM.Experimen
 docker compose -f deploy/docker-compose.yml up -d     # PostgreSQL 17 on 127.0.0.1:5432, data in volume errorlens-pgdata
 ```
 
+## Collection pipeline
+
+An application adds one sink to its Serilog configuration:
+
+```csharp
+builder.Host.UseSerilog((context, logger) => logger
+    .WriteTo.ErrorLens(new ErrorLensSinkOptions { CollectorUrl = new("http://localhost:5025/"), Application = "kayit" }));
+```
+
+The sink batches events in the background and never blocks the application. It sends the message template,
+structured properties, the W3C trace id of the current `Activity` (the id OpenTelemetry uses, so a request can be
+followed across services), and, for exceptions, the stack frames of the exception that entered application code.
+At startup it announces the release (version and commit from `AssemblyInformationalVersion`) as a deployment.
+
+The collector (`src/ErrorLensLLM.Collector`, `POST /api/ingest/logs`) then:
+
+1. masks personal data (e-mail, phone, Turkish ID number, configured fields and properties),
+2. assigns a template: the application's message template, or Drain for plain-text messages,
+3. fingerprints exceptions (type + message template + top application frames),
+4. stores events, templates, error groups and deployments in PostgreSQL.
+
+### Demo: a faulty release
+
+`samples/ErrorLensLLM.Demo` is a small student information system with three modules, each a separate process:
+`kayit` (enrollment), `not` (grades) and `odeme` (payments). The `not` and `odeme` modules call `kayit` over HTTP.
+A traffic generator keeps the modules busy.
+
+```bash
+scripts/demo.sh start                                  # collector + modules 1.0.0 + traffic
+scripts/demo.sh deploy kayit 1.1.0 kayit-missing-column  # release a version that reads a column with no migration
+scripts/demo.sh status
+scripts/demo.sh stop
+```
+
+In 25 seconds after the faulty release, one `PostgresException` in `kayit` produced 558 errors there, plus 218 errors
+in `not` and 114 in `odeme`. These appeared as five separate error groups. The next stage correlates them into one
+incident and points to the `kayit` 1.1.0 release.
+Other scenarios with a known root cause: `odeme-bank-timeout` and `not-null-reference`.
+
 ## Repository layout
 
 | Path | Contents | Status |
@@ -93,11 +132,13 @@ docker compose -f deploy/docker-compose.yml up -d     # PostgreSQL 17 on 127.0.0
 | `src/ErrorLensLLM.Core` | Exception capture model, PII masking, message normalization, fingerprinting, background queue | ✅ first version |
 | `experiments/ErrorLensLLM.Experiments` | Reproducible experiments on public datasets | ✅ HDFS |
 | `tests/` | Unit tests for Core and Ml | ✅ |
-| `src/ErrorLensLLM.AspNetCore` | Middleware, Serilog / OpenTelemetry integration, dashboard | planned |
-| `src/ErrorLensLLM.Storage.PostgreSql` | Central log and incident store | planned |
+| `src/ErrorLensLLM.Serilog` | Serilog sink that sends logs to the collector | ✅ |
+| `src/ErrorLensLLM.Collector` | Ingestion API: masking, templating, fingerprinting | ✅ |
+| `src/ErrorLensLLM.AspNetCore` | Dashboard (incidents, feedback) | planned |
+| `src/ErrorLensLLM.Storage.PostgreSql` | Central log and incident store | ✅ logs, ⏳ incidents |
 | `src/ErrorLensLLM.AI.Claude` | LLM explanation of incidents | planned |
 | `src/ErrorLensLLM.Source.Bitbucket` | Fetches source code at the deployed commit for root cause context | planned |
-| `samples/ErrorLensLLM.Demo` | Demo app with controlled fault injection | planned |
+| `samples/ErrorLensLLM.Demo` | Demo modules with controlled fault injection | ✅ |
 
 ## Roadmap
 
@@ -105,7 +146,7 @@ docker compose -f deploy/docker-compose.yml up -d     # PostgreSQL 17 on 127.0.0
 - [x] DeepLog tuning (top-g sweep, training size) and Drain parsing accuracy against the ground-truth templates
 - [ ] Embedding + clustering for grouping similar errors
 - [ ] BGL dataset
-- [ ] Collection pipeline: Serilog / OpenTelemetry → PostgreSQL
+- [x] Collection pipeline: Serilog sink (W3C trace ids) → collector → PostgreSQL, demo modules with fault injection
 - [ ] Incident correlation (deploy time, shared causes, trace chain) and root cause ranking
 - [ ] LLM explanation layer and dashboard with feedback
 - [ ] Evaluation with fault injection scenarios (top-k root cause accuracy)

@@ -483,3 +483,6 @@ $RECYCLE.BIN/
 
 # Datasets (LogHub etc.) and experiment caches
 /data/
+
+# Demo runtime state (logs, pids)
+/.demo/

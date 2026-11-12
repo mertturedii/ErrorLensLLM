@@ -1,44 +1,52 @@
-var builder = WebApplication.CreateBuilder(args);
+using ErrorLensLLM.Demo;
+using ErrorLensLLM.Serilog;
+using Npgsql;
+using Serilog;
 
-// Add services to the container.
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+// A small student information system split into modules, each run as its own process:
+//   dotnet run --project samples/ErrorLensLLM.Demo -- --Demo:Module=kayit --urls http://localhost:5101
+// A release with a fault: --Demo:Version=1.1.0 --Demo:Faults:0=kayit-missing-column (see Faults)
+
+var builder = WebApplication.CreateBuilder(args);
+var demo = builder.Configuration.GetSection(DemoOptions.Section).Get<DemoOptions>() ?? new DemoOptions();
+builder.Services.Configure<DemoOptions>(builder.Configuration.GetSection(DemoOptions.Section));
+
+builder.Host.UseSerilog((context, logger) => logger
+    .ReadFrom.Configuration(context.Configuration)
+    .Enrich.WithProperty("Module", demo.Module)
+    .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Module}: {Message:lj}{NewLine}{Exception}")
+    .WriteTo.ErrorLens(new ErrorLensSinkOptions
+    {
+        CollectorUrl = demo.CollectorUrl,
+        Application = demo.Module,
+        Environment = demo.Environment,
+        Version = demo.Version
+    }));
+
+foreach (var (name, url) in demo.Modules)
+    builder.Services.AddHttpClient(name, c => { c.BaseAddress = url; c.Timeout = TimeSpan.FromSeconds(10); });
+
+var connectionString = builder.Configuration.GetConnectionString("Demo")!;
+builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
+
+if (demo.Module == "traffic")
+    builder.Services.AddHostedService<TrafficGenerator>();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+if (demo.Module == "kayit")
+    await DemoDatabase.EnsureAsync(connectionString);
+
+Log.Information("{Module} {Version} basladi, aktif hatalar: {Faults}", demo.Module, demo.Version, demo.Faults);
+
+switch (demo.Module)
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
+    case "kayit": Modules.MapKayit(app); break;
+    case "not": Modules.MapNot(app); break;
+    case "odeme": Modules.MapOdeme(app); break;
+    case "traffic": break;
+    default: throw new InvalidOperationException($"Unknown module '{demo.Module}'. Use kayit, not, odeme or traffic.");
 }
 
-app.UseHttpsRedirection();
-
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
-
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast")
-.WithOpenApi();
-
+app.MapGet("/health", () => Results.Ok(new { module = demo.Module, version = demo.Version, faults = demo.Faults }));
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}

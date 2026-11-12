@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="Serilog" Version="4.4.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ErrorLensLLM.Collector.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ErrorLensLLM.Core\ErrorLensLLM.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -7,19 +7,24 @@ public sealed partial class SensitiveDataMasker
 {
     public const string Mask = "***";
 
+    private readonly string[] _fields;
     private readonly Regex? _fieldRegex;
 
     public SensitiveDataMasker(IEnumerable<string>? sensitiveFields = null)
     {
-        var fields = sensitiveFields?.Where(f => !string.IsNullOrWhiteSpace(f)).Select(Regex.Escape).ToArray() ?? [];
-        if (fields.Length > 0)
+        _fields = sensitiveFields?.Where(f => !string.IsNullOrWhiteSpace(f)).ToArray() ?? [];
+        if (_fields.Length > 0)
         {
             // key=value, key: value, "key":"value with spaces"; the key must not be the tail of a longer word
             _fieldRegex = new Regex(
-                $$"""(?<key>"?(?<![A-Za-z0-9_])(?:{{string.Join('|', fields)}})"?\s*[:=]\s*)(?:(?<quote>")[^"]*"|[^",;&\s}]+)""",
+                $$"""(?<key>"?(?<![A-Za-z0-9_])(?:{{string.Join('|', _fields.Select(Regex.Escape))}})"?\s*[:=]\s*)(?:(?<quote>")[^"]*"|[^",;&\s}]+)""",
                 RegexOptions.IgnoreCase | RegexOptions.Compiled);
         }
     }
+
+    /// <summary>True when a structured property name contains a configured field (UserPassword, AccessToken…).</summary>
+    public bool IsSensitiveField(string name) =>
+        _fields.Any(field => name.Contains(field, StringComparison.OrdinalIgnoreCase));
 
     public string MaskText(string? text)
     {
