@@ -2,6 +2,7 @@
 # Runs the collector, the three demo modules and the traffic generator as local processes.
 #
 #   scripts/demo.sh start                          collector + kayit/not/odeme 1.0.0 + traffic
+#   scripts/demo.sh collector                      only the collector (ingestion + incident analysis)
 #   scripts/demo.sh deploy <module> <version> [fault...]   restart one module as a new release
 #   scripts/demo.sh status | stop
 #
@@ -69,6 +70,10 @@ case "${1:-}" in
     run not --Demo:Version=1.0.0
     run odeme --Demo:Version=1.0.0
     run traffic
+    ;;
+  collector)
+    build
+    run collector
     ;;
   deploy)
     module=${2:?module}; version=${3:?version}; shift 3

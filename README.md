@@ -120,9 +120,30 @@ scripts/demo.sh stop
 ```
 
 In 25 seconds after the faulty release, one `PostgresException` in `kayit` produced 558 errors there, plus 218 errors
-in `not` and 114 in `odeme`. These appeared as five separate error groups. The next stage correlates them into one
-incident and points to the `kayit` 1.1.0 release.
+in `not` and 114 in `odeme`: five separate error groups.
 Other scenarios with a known root cause: `odeme-bank-timeout` and `not-null-reference`.
+
+## Incidents and root cause
+
+Every 10 seconds the collector correlates the errors of the last hour into incidents
+([IncidentCorrelator](src/ErrorLensLLM.Core/Incidents/IncidentCorrelator.cs)):
+
+- **Linking.** Two error groups belong to the same incident when their errors occur in the same distributed trace, or
+  when both start within 60 s of each other shortly after the same deployment. The second case catches callers that
+  only see "connection refused" while a service restarts. An error group that returns after 15 quiet minutes starts
+  a new episode, and can therefore start a new incident.
+- **Suspected trigger.** The last deployment shortly before the incident started.
+- **Root cause score** of each member, with the evidence behind it:
+  0.5 × *upstream* (share of shared traces in which its error comes first) +
+  0.3 × *deployment* (it belongs to the suspected deployment's application, decaying over 5 min) +
+  0.2 × *onset* (how early it started within the incident).
+- **Category.** Rule-based, from the exception type and message: database schema, database, dependency, timeout,
+  code defect, validation, authorization, configuration.
+
+For the faulty release above, all five error groups form one incident, titled
+*"kayit 1.1.0 sonrası PostgresException — 3 modül"*. The `PostgresException` in `kayit` ranks first with a score of
+0.88; its evidence is "first error in the chain in 909 of 909 shared traces" and "started 0 s after the kayit 1.1.0
+deployment". The HTTP errors in `not` and `odeme` score 0–0.08 and are classified as dependency failures.
 
 ## Repository layout
 
@@ -147,7 +168,7 @@ Other scenarios with a known root cause: `odeme-bank-timeout` and `not-null-refe
 - [ ] Embedding + clustering for grouping similar errors
 - [ ] BGL dataset
 - [x] Collection pipeline: Serilog sink (W3C trace ids) → collector → PostgreSQL, demo modules with fault injection
-- [ ] Incident correlation (deploy time, shared causes, trace chain) and root cause ranking
+- [x] Incident correlation (trace chain, deployment, onset) and root cause ranking
 - [ ] LLM explanation layer and dashboard with feedback
 - [ ] Evaluation with fault injection scenarios (top-k root cause accuracy)
 

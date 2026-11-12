@@ -1,7 +1,9 @@
 using System.Security.Cryptography;
 using System.Text;
 using ErrorLensLLM.Collector;
+using ErrorLensLLM.Collector.Incidents;
 using ErrorLensLLM.Collector.Ingestion;
+using ErrorLensLLM.Core.Incidents;
 using ErrorLensLLM.Core.Ingestion;
 using ErrorLensLLM.Core.Processing;
 using ErrorLensLLM.Storage.PostgreSql;
@@ -21,9 +23,17 @@ builder.Services.AddSingleton(sp =>
 });
 builder.Services.AddSingleton<IngestService>();
 
+builder.Services.Configure<AnalysisOptions>(builder.Configuration.GetSection(AnalysisOptions.Section));
+builder.Services.AddSingleton<PostgresIncidentStore>();
+builder.Services.AddSingleton(new IncidentCorrelator());
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<IncidentAnalyzer>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<IncidentAnalyzer>());
+
 var app = builder.Build();
 
 await app.Services.GetRequiredService<PostgresLogStore>().EnsureSchemaAsync();
+await app.Services.GetRequiredService<PostgresIncidentStore>().EnsureSchemaAsync();
 
 app.MapGet("/health", async (NpgsqlDataSource db, CancellationToken ct) =>
 {
