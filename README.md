@@ -145,6 +145,21 @@ For the faulty release above, all five error groups form one incident, titled
 0.88; its evidence is "first error in the chain in 909 of 909 shared traces" and "started 0 s after the kayit 1.1.0
 deployment". The HTTP errors in `not` and `odeme` score 0–0.08 and are classified as dependency failures.
 
+## Dashboard
+
+`src/ErrorLensLLM.Dashboard` (Blazor Server, http://localhost:5200, started by `scripts/demo.sh`) reads the same database:
+
+- **Incidents:** open, closed or all; refreshes every 10 s.
+- **Incident detail:**
+  - the root cause with its evidence and the suspected deployment (version, commit);
+  - a timeline of errors per module with deployment markers, and a table view;
+  - every root cause candidate with its score;
+  - one request chain showing how the failure spread across modules;
+  - the latest errors.
+- **Feedback:** developers mark the suggested root cause correct or wrong, and can pick the real one.
+  Verdicts are stored with the suggestion they judged (`incident_feedback`), which makes them evaluation data for the
+  correlator.
+
 ## Repository layout
 
 | Path | Contents | Status |
@@ -155,7 +170,7 @@ deployment". The HTTP errors in `not` and `odeme` score 0–0.08 and are classif
 | `tests/` | Unit tests for Core and Ml | ✅ |
 | `src/ErrorLensLLM.Serilog` | Serilog sink that sends logs to the collector | ✅ |
 | `src/ErrorLensLLM.Collector` | Ingestion API: masking, templating, fingerprinting | ✅ |
-| `src/ErrorLensLLM.AspNetCore` | Dashboard (incidents, feedback) | planned |
+| `src/ErrorLensLLM.Dashboard` | Blazor Server dashboard: incidents, root cause, timeline, feedback | ✅ |
 | `src/ErrorLensLLM.Storage.PostgreSql` | Central log and incident store | ✅ logs, ⏳ incidents |
 | `src/ErrorLensLLM.AI.Claude` | LLM explanation of incidents | planned |
 | `src/ErrorLensLLM.Source.Bitbucket` | Fetches source code at the deployed commit for root cause context | planned |
@@ -169,7 +184,8 @@ deployment". The HTTP errors in `not` and `odeme` score 0–0.08 and are classif
 - [ ] BGL dataset
 - [x] Collection pipeline: Serilog sink (W3C trace ids) → collector → PostgreSQL, demo modules with fault injection
 - [x] Incident correlation (trace chain, deployment, onset) and root cause ranking
-- [ ] LLM explanation layer and dashboard with feedback
+- [x] Dashboard with developer feedback
+- [ ] LLM explanation layer
 - [ ] Evaluation with fault injection scenarios (top-k root cause accuracy)
 
 ## Privacy

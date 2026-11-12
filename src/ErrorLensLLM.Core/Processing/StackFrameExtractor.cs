@@ -17,7 +17,8 @@ public static class StackFrameExtractor
     private static readonly HashSet<string> LibraryAssemblies =
     [
         "ErrorLensLLM.Core",
-        "ErrorLensLLM.AspNetCore",
+        "ErrorLensLLM.Collector",
+        "ErrorLensLLM.Dashboard",
         "ErrorLensLLM.Serilog",
         "ErrorLensLLM.Storage.PostgreSql",
         "ErrorLensLLM.Source.Bitbucket",

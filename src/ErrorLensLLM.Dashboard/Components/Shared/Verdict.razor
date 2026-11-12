@@ -1,0 +1,17 @@
+@* Developer verdict on the suggested root cause, as an icon-free label + dot (never color alone) *@
+@switch (Value)
+{
+    case "correct":
+        <span class="badge good"><span class="dot"></span>Doğru</span>
+        break;
+    case "wrong":
+        <span class="badge bad"><span class="dot"></span>Yanlış</span>
+        break;
+    default:
+        <span class="muted">—</span>
+        break;
+}
+
+@code {
+    [Parameter] public string? Value { get; set; }
+}

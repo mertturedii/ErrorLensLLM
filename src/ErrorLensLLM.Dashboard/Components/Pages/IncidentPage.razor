@@ -1,0 +1,285 @@
+@page "/olaylar/{Id:guid}"
+@inject PostgresDashboardStore Store
+@inject DashboardFormat Format
+
+<PageTitle>@(_incident?.Summary.Title ?? "Olay") · ErrorLensLLM</PageTitle>
+
+<p><a href="">← Olaylar</a></p>
+
+@if (_loaded && _incident is null)
+{
+    <div class="card empty">Olay bulunamadı.</div>
+}
+else if (_incident is { } incident)
+{
+    var summary = incident.Summary;
+    var root = incident.Members[0];
+
+    <div class="page-head">
+        <div>
+            <h1>@summary.Title</h1>
+            <div class="meta secondary">
+                <span class="badge @summary.Status"><span class="dot"></span>@DashboardFormat.Status(summary.Status)</span>
+                <span>@DashboardFormat.Category(summary.Category)</span>
+                <span>@Format.DateTime(summary.StartedAt) · @DashboardFormat.Duration(summary.LastSeen - summary.StartedAt)</span>
+                <span>@summary.Occurrences.ToString("N0") hata</span>
+                @foreach (var app in Applications)
+                {
+                    <span class="chip"><span class="swatch" style="background:@ColorOf(app)"></span>@app</span>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="grid-2">
+        <section class="card">
+            <h2>Kök neden</h2>
+            <div class="root-title">
+                <span class="chip"><span class="swatch" style="background:@ColorOf(root.Application)"></span>@root.Application</span>
+                <strong>@DashboardFormat.ShortType(root.ExceptionType)</strong>
+            </div>
+            <div class="mono secondary">@root.NormalizedMessage</div>
+            @if (root.TopFrame is not null)
+            {
+                <div class="muted">Kod konumu: <code>@root.TopFrame</code></div>
+            }
+            <ul class="evidence">
+                @foreach (var line in root.Evidence)
+                {
+                    <li>@line</li>
+                }
+            </ul>
+        </section>
+
+        <section class="card">
+            <h2>Şüpheli deploy</h2>
+            @if (incident.SuspectedDeployment is { } deployment)
+            {
+                <div class="deploy-title"><strong>@deployment.Application @deployment.Version</strong></div>
+                var gap = summary.StartedAt - deployment.StartedAt;
+                <div class="secondary">@Format.DateTime(deployment.StartedAt) ·
+                    @(gap.Duration() < TimeSpan.FromSeconds(1) ? "olayla aynı anda"
+                        : $"olaydan {DashboardFormat.Duration(gap.Duration())} {(gap > TimeSpan.Zero ? "önce" : "sonra")}")</div>
+                @if (!string.IsNullOrEmpty(deployment.CommitSha))
+                {
+                    <div class="muted">Commit <code>@DashboardFormat.ShortCommit(deployment.CommitSha)</code></div>
+                }
+            }
+            else
+            {
+                <div class="secondary">Olaydan hemen önce bir deploy yok.</div>
+            }
+        </section>
+    </div>
+
+    <section class="card">
+        <h2>LLM açıklaması</h2>
+        <div class="secondary">LLM katmanı henüz yapılandırılmadı. Yapılandırıldığında burada, yukarıdaki kanıtlara ve ilgili koda dayanan bir neden ve çözüm açıklaması görünecek.</div>
+    </section>
+
+    <section class="card">
+        <h2>Zaman çizelgesi</h2>
+        <Timeline Points="_timeline" Bucket="_bucket" Deployments="_deployments" Applications="Applications"
+                  Highlighted="incident.SuspectedDeployment" />
+    </section>
+
+    <section class="card">
+        <h2>Kök neden adayları</h2>
+        <table class="list">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Modül</th>
+                    <th>Hata</th>
+                    <th class="hide-narrow">Kategori</th>
+                    <th class="num">Sayı</th>
+                    <th>Skor</th>
+                </tr>
+            </thead>
+            <tbody>
+                @for (var i = 0; i < incident.Members.Count; i++)
+                {
+                    var member = incident.Members[i];
+                    <tr>
+                        <td class="num">@(i + 1)</td>
+                        <td><span class="chip"><span class="swatch" style="background:@ColorOf(member.Application)"></span>@member.Application</span></td>
+                        <td>
+                            <strong>@DashboardFormat.ShortType(member.ExceptionType)</strong>
+                            <div class="mono secondary">@member.NormalizedMessage</div>
+                            @if (member.Evidence.Count > 0)
+                            {
+                                <div class="muted small">@string.Join(" · ", member.Evidence)</div>
+                            }
+                        </td>
+                        <td class="hide-narrow">@DashboardFormat.Category(member.Category)</td>
+                        <td class="num">@member.Occurrences.ToString("N0")</td>
+                        <td>
+                            <div class="score">
+                                <div class="score-bar"><span style="width:@Percent(member.RootCauseScore)"></span></div>
+                                <span class="num">@member.RootCauseScore.ToString("0.00")</span>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </section>
+
+    <section class="card">
+        <h2>Geri bildirim</h2>
+        @if (_feedback is { } given && !_editing)
+        {
+            <div>
+                <Verdict Value="@given.Verdict" />
+                <span class="secondary">@Format.DateTime(given.CreatedAt)</span>
+                @if (given.CorrectFingerprint is { } correct && incident.Members.FirstOrDefault(m => m.Fingerprint == correct) is { } chosen)
+                {
+                    <div class="secondary">Gerçek kök neden: @chosen.Application · @DashboardFormat.ShortType(chosen.ExceptionType)</div>
+                }
+                @if (!string.IsNullOrEmpty(given.Comment))
+                {
+                    <div class="secondary">“@given.Comment”</div>
+                }
+                <button class="secondary small-gap" @onclick="() => _editing = true">Değiştir</button>
+            </div>
+        }
+        else
+        {
+            <p class="secondary">Önerilen kök neden (<strong>@root.Application · @DashboardFormat.ShortType(root.ExceptionType)</strong>) doğru mu?</p>
+            <div class="actions">
+                <button class="@(_verdict == "correct" ? "primary" : "secondary")" @onclick='() => _verdict = "correct"'>Doğru</button>
+                <button class="@(_verdict == "wrong" ? "primary" : "secondary")" @onclick='() => _verdict = "wrong"'>Yanlış</button>
+            </div>
+            @if (_verdict == "wrong")
+            {
+                <label class="field">
+                    <span class="secondary">Gerçek kök neden hangisi? (isteğe bağlı)</span>
+                    <select @bind="_correctFingerprint">
+                        <option value="">Bilmiyorum / listede yok</option>
+                        @foreach (var member in incident.Members.Skip(1))
+                        {
+                            <option value="@member.Fingerprint">@member.Application · @DashboardFormat.ShortType(member.ExceptionType)</option>
+                        }
+                    </select>
+                </label>
+            }
+            @if (_verdict is not null)
+            {
+                <label class="field">
+                    <span class="secondary">Not (isteğe bağlı)</span>
+                    <textarea rows="2" @bind="_comment"></textarea>
+                </label>
+                <button class="primary" disabled="@_saving" @onclick="SaveFeedbackAsync">Kaydet</button>
+            }
+        }
+    </section>
+
+    @if (_trace.Count > 0)
+    {
+        <section class="card">
+            <h2>Hatanın yayılışı <span class="muted small">örnek istek zinciri · trace <code>@_trace[0].TraceId</code></span></h2>
+            <ol class="trace">
+                @foreach (var e in _trace)
+                {
+                    <li class="@(e.Fingerprint == root.Fingerprint ? "is-root" : "")">
+                        <span class="num muted">@Format.TimeWithMs(e.Timestamp)</span>
+                        <span class="chip"><span class="swatch" style="background:@ColorOf(e.Application)"></span>@e.Application</span>
+                        <span class="level">@e.Level</span>
+                        <span>@(e.ExceptionType is null ? e.Message : DashboardFormat.ShortType(e.ExceptionType))</span>
+                        @if (e.Fingerprint == root.Fingerprint)
+                        {
+                            <span class="badge open"><span class="dot"></span>kök neden</span>
+                        }
+                    </li>
+                }
+            </ol>
+        </section>
+    }
+
+    <section class="card">
+        <h2>Son hatalar</h2>
+        <table class="list">
+            <thead>
+                <tr>
+                    <th>Zaman</th>
+                    <th>Modül</th>
+                    <th>Hata</th>
+                    <th class="hide-narrow">Trace</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var e in _recent)
+                {
+                    <tr>
+                        <td class="num" style="text-align:left">@Format.TimeWithMs(e.Timestamp)</td>
+                        <td><span class="chip"><span class="swatch" style="background:@ColorOf(e.Application)"></span>@e.Application</span></td>
+                        <td>
+                            <strong>@DashboardFormat.ShortType(e.ExceptionType)</strong>
+                            <div class="secondary small">@(e.ExceptionMessage ?? e.Message)</div>
+                        </td>
+                        <td class="hide-narrow"><code class="muted">@(e.TraceId?[..8])</code></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </section>
+}
+else
+{
+    <div class="card empty">Yükleniyor…</div>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private IncidentDetail? _incident;
+    private bool _loaded;
+    private IReadOnlyList<TimelinePoint> _timeline = [];
+    private TimeSpan _bucket;
+    private IReadOnlyList<DeploymentView> _deployments = [];
+    private IReadOnlyList<LogEventView> _trace = [];
+    private IReadOnlyList<LogEventView> _recent = [];
+    private FeedbackView? _feedback;
+
+    private string? _verdict;
+    private string _correctFingerprint = "";
+    private string? _comment;
+    private bool _saving;
+    private bool _editing;
+
+    /// <summary>Sorted once, so each application keeps the same color slot on every part of the page.</summary>
+    private IReadOnlyList<string> Applications => _incident?.Summary.Applications.Order().ToList() ?? [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _incident = await Store.GetIncidentAsync(Id);
+        _loaded = true;
+        if (_incident is null)
+            return;
+
+        (_bucket, _timeline) = await Store.TimelineAsync(_incident.Summary);
+        _deployments = await Store.DeploymentsAroundAsync(_incident.Summary);
+        _trace = await Store.SampleTraceAsync(Id, _incident.RootFingerprint);
+        _recent = await Store.RecentErrorsAsync(Id);
+        _feedback = await Store.LatestFeedbackAsync(Id);
+    }
+
+    private async Task SaveFeedbackAsync()
+    {
+        if (_verdict is null)
+            return;
+
+        _saving = true;
+        await Store.SaveFeedbackAsync(Id, _verdict, _verdict == "wrong" && _correctFingerprint != "" ? _correctFingerprint : null, _comment);
+        _feedback = await Store.LatestFeedbackAsync(Id);
+        (_verdict, _correctFingerprint, _comment, _saving, _editing) = (null, "", null, false, false);
+    }
+
+    private string ColorOf(string application)
+    {
+        var index = Applications.ToList().IndexOf(application);
+        return index is >= 0 and < 5 ? $"var(--series-{index + 1})" : "var(--series-other)";
+    }
+
+    private static string Percent(double score) => $"{Math.Clamp(score, 0, 1) * 100:0}%";
+}

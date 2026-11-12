@@ -33,6 +33,18 @@ public sealed class PostgresIncidentStore(NpgsqlDataSource dataSource)
             primary key (incident_id, fingerprint)
         );
         create index if not exists ix_incident_groups_fingerprint on incident_groups (fingerprint);
+
+        -- Developer verdicts on the suggested root cause; the evaluation data for the correlator
+        create table if not exists incident_feedback (
+            id                    bigserial primary key,
+            incident_id           uuid not null references incidents (id),
+            verdict               text not null check (verdict in ('correct', 'wrong')),
+            suggested_fingerprint text not null,
+            correct_fingerprint   text,
+            comment               text,
+            created_at            timestamptz not null default now()
+        );
+        create index if not exists ix_incident_feedback_incident on incident_feedback (incident_id, created_at desc);
         """;
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };

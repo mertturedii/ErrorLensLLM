@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Runs the collector, the three demo modules and the traffic generator as local processes.
 #
-#   scripts/demo.sh start                          collector + kayit/not/odeme 1.0.0 + traffic
-#   scripts/demo.sh collector                      only the collector (ingestion + incident analysis)
+#   scripts/demo.sh start                          collector + dashboard + kayit/not/odeme 1.0.0 + traffic
+#   scripts/demo.sh collector                      collector (ingestion + incident analysis) + dashboard
+#   Dashboard: http://localhost:5200
 #   scripts/demo.sh deploy <module> <version> [fault...]   restart one module as a new release
 #   scripts/demo.sh status | stop
 #
@@ -16,11 +17,12 @@ mkdir -p "$state/logs" "$state/pids"
 
 # macOS ships bash 3.2, which has no associative arrays
 port() {
-  case $1 in collector) echo 5025 ;; kayit) echo 5101 ;; not) echo 5102 ;; odeme) echo 5103 ;; traffic) echo 5100 ;; esac
+  case $1 in collector) echo 5025 ;; dashboard) echo 5200 ;; kayit) echo 5101 ;; not) echo 5102 ;; odeme) echo 5103 ;; traffic) echo 5100 ;; esac
 }
 
 build() {
   dotnet build "$root/src/ErrorLensLLM.Collector" -c Release -v q -nologo >/dev/null
+  dotnet build "$root/src/ErrorLensLLM.Dashboard" -c Release -v q -nologo >/dev/null
   dotnet build "$root/samples/ErrorLensLLM.Demo" -c Release -v q -nologo >/dev/null
 }
 
@@ -41,6 +43,10 @@ run() {
     dotnet "$root/src/ErrorLensLLM.Collector/bin/Release/net8.0/ErrorLensLLM.Collector.dll" \
       --urls "http://localhost:$(port collector)" --contentRoot "$root/src/ErrorLensLLM.Collector" \
       >>"$state/logs/collector.log" 2>&1 &
+  elif [[ $name == dashboard ]]; then
+    dotnet "$root/src/ErrorLensLLM.Dashboard/bin/Release/net8.0/ErrorLensLLM.Dashboard.dll" \
+      --urls "http://localhost:$(port dashboard)" --contentRoot "$root/src/ErrorLensLLM.Dashboard" \
+      >>"$state/logs/dashboard.log" 2>&1 &
   else
     dotnet "$root/samples/ErrorLensLLM.Demo/bin/Release/net8.0/ErrorLensLLM.Demo.dll" \
       --urls "http://localhost:$(port "$name")" --contentRoot "$root/samples/ErrorLensLLM.Demo" \
@@ -66,6 +72,7 @@ case "${1:-}" in
   start)
     build
     run collector
+    run dashboard
     run kayit --Demo:Version=1.0.0
     run not --Demo:Version=1.0.0
     run odeme --Demo:Version=1.0.0
@@ -74,6 +81,7 @@ case "${1:-}" in
   collector)
     build
     run collector
+    run dashboard
     ;;
   deploy)
     module=${2:?module}; version=${3:?version}; shift 3
@@ -82,12 +90,12 @@ case "${1:-}" in
     run "$module" "${args[@]}"
     ;;
   status)
-    for name in collector kayit not odeme traffic; do
+    for name in collector dashboard kayit not odeme traffic; do
       printf "%-10s " "$name"; curl -sf "http://localhost:$(port "$name")/health" || printf "down"; echo
     done
     ;;
   stop)
-    for name in traffic odeme not kayit collector; do stop_one "$name"; done
+    for name in traffic odeme not kayit dashboard collector; do stop_one "$name"; done
     echo stopped
     ;;
   *)

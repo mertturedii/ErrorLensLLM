@@ -1,0 +1,186 @@
+/* Tokens: chart chrome and categorical slots follow the dataviz reference palette (validated light + dark) */
+:root {
+    color-scheme: light;
+    --page: #f9f9f7;
+    --surface-1: #fcfcfb;
+    --surface-2: #f3f3f0;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.10);
+    --accent: #2a78d6;
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --series-3: #1baf7a;
+    --series-4: #eda100;
+    --series-5: #e87ba4;
+    --series-other: #898781;
+    --critical: #d03b3b;
+    --critical-bg: #fbe4e4;
+    --good: #0ca30c;
+    --good-text: #006300;
+    --good-bg: #e2f4e2;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+        color-scheme: dark;
+        --page: #0d0d0d;
+        --surface-1: #1a1a19;
+        --surface-2: #232321;
+        --text-primary: #f0efec;
+        --text-secondary: #c3c2b7;
+        --text-muted: #898781;
+        --grid: #2c2c2a;
+        --axis: #383835;
+        --border: rgba(255, 255, 255, 0.10);
+        --accent: #3987e5;
+        --series-1: #3987e5;
+        --series-2: #d95926;
+        --series-3: #199e70;
+        --series-4: #c98500;
+        --series-5: #d55181;
+        --critical-bg: #3a1d1d;
+        --good-text: #0ca30c;
+        --good-bg: #16301a;
+    }
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text-primary);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+h1 { font-size: 22px; font-weight: 650; margin: 0; }
+/* Blazor focuses the heading after navigation for screen readers; no visible ring needed there */
+h1:focus { outline: none; }
+h2 { font-size: 15px; font-weight: 650; margin: 0 0 12px; }
+a { color: var(--accent); }
+code, .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; }
+
+.muted { color: var(--text-muted); }
+.secondary { color: var(--text-secondary); }
+.num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+
+.card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin-bottom: 16px;
+}
+
+.page-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+/* Segmented filter */
+.tabs { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.tabs button {
+    background: var(--surface-1);
+    color: var(--text-secondary);
+    border: 0;
+    padding: 6px 14px;
+    font: inherit;
+    cursor: pointer;
+}
+.tabs button + button { border-left: 1px solid var(--border); }
+.tabs button.active { background: var(--surface-2); color: var(--text-primary); font-weight: 600; }
+
+/* Tables */
+table.list { width: 100%; border-collapse: collapse; }
+table.list th {
+    text-align: left;
+    font-weight: 500;
+    color: var(--text-muted);
+    font-size: 12.5px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--grid);
+}
+table.list td { padding: 9px 10px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+table.list tr.clickable { cursor: pointer; }
+table.list tr.clickable:hover td { background: var(--surface-2); }
+
+/* Badges: text in ink, the dot carries the color, never color alone */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    font-size: 12.5px;
+    white-space: nowrap;
+    color: var(--text-primary);
+}
+.badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+.badge.open .dot { background: var(--critical); }
+.badge.good .dot { background: var(--good); }
+.badge.bad .dot { background: var(--critical); }
+
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0 7px;
+    border-radius: 6px;
+    background: var(--surface-2);
+    font-size: 12.5px;
+    white-space: nowrap;
+}
+.chip .swatch { width: 8px; height: 8px; border-radius: 2px; }
+
+.empty { padding: 32px; text-align: center; color: var(--text-secondary); }
+
+button.primary, button.secondary {
+    font: inherit;
+    padding: 6px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    border: 1px solid var(--border);
+}
+button.primary { background: var(--accent); color: #fff; border-color: transparent; }
+button.secondary { background: var(--surface-1); color: var(--text-primary); }
+button:disabled { opacity: 0.5; cursor: default; }
+
+textarea, select {
+    font: inherit;
+    color: var(--text-primary);
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 8px;
+    width: 100%;
+}
+
+details > summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; }
+
+/* Global, so it stays hidden even if component styles fail to load */
+#blazor-error-ui {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 10px 24px;
+    background: var(--critical-bg);
+    color: var(--text-primary);
+    z-index: 1000;
+}
+#blazor-error-ui .dismiss { cursor: pointer; position: absolute; right: 16px; }
+
+@media (max-width: 720px) {
+    .page { padding: 16px; }
+    .hide-narrow { display: none; }
+}
