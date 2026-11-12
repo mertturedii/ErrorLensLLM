@@ -145,6 +145,20 @@ For the faulty release above, all five error groups form one incident, titled
 0.88; its evidence is "first error in the chain in 909 of 909 shared traces" and "started 0 s after the kayit 1.1.0
 deployment". The HTTP errors in `not` and `odeme` score 0–0.08 and are classified as dependency failures.
 
+## Evaluation with fault injection
+
+`dotnet run --project experiments/ErrorLensLLM.Experiments -c Release -- faults` releases each demo fault
+(`kayit-missing-column`, `odeme-bank-timeout`, `not-null-reference`) several times against a fresh database
+(`errorlens_eval`; the development database is not touched). It then compares the resulting incident with the known root
+cause. Top-1 / Top-3 accuracy, category, suspected deployment, incidents per fault, false alarms during normal traffic and
+detection time are written to [docs/experiments/fault-injection.md](docs/experiments/fault-injection.md).
+
+**Limitations.** The scenarios were written together with the correlator and are favorable to it: each fault is triggered
+continuously, right after a release, in a small system with three services. They show that the pipeline works end to
+end, not how often it is right in production. Missing cases include faults without a release (an external service going
+down), faults that surface minutes after a release, several releases landing together, and errors that are only
+logged, never thrown. The developer feedback stored by the dashboard is meant to measure accuracy on real incidents.
+
 ## Dashboard
 
 `src/ErrorLensLLM.Dashboard` (Blazor Server, http://localhost:5200, started by `scripts/demo.sh`) reads the same database:

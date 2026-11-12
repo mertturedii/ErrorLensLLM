@@ -16,6 +16,7 @@ public sealed class PostgresIncidentStore(NpgsqlDataSource dataSource)
             merged_into             uuid references incidents (id),
             started_at              timestamptz not null,
             last_seen               timestamptz not null,
+            created_at              timestamptz not null default now(),
             updated_at              timestamptz not null default now(),
             title                   text not null,
             category                text not null,
@@ -26,6 +27,8 @@ public sealed class PostgresIncidentStore(NpgsqlDataSource dataSource)
             members                 jsonb not null
         );
         create index if not exists ix_incidents_status on incidents (status, last_seen desc);
+        -- When the incident was first detected; databases created before this column get it on startup
+        alter table incidents add column if not exists created_at timestamptz not null default now();
 
         create table if not exists incident_groups (
             incident_id uuid not null references incidents (id),

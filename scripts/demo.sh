@@ -9,6 +9,8 @@
 #
 # Example incident: scripts/demo.sh deploy kayit 1.1.0 kayit-missing-column
 # Needs PostgreSQL: docker compose -f deploy/docker-compose.yml up -d
+# DEMO_SKIP_BUILD=1 skips the Release build (the fault-injection experiment builds once and restarts many times).
+# Child processes inherit the environment, e.g. ConnectionStrings__ErrorLens to use another database.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -21,6 +23,7 @@ port() {
 }
 
 build() {
+  [[ ${DEMO_SKIP_BUILD:-} == 1 ]] && return 0
   dotnet build "$root/src/ErrorLensLLM.Collector" -c Release -v q -nologo >/dev/null
   dotnet build "$root/src/ErrorLensLLM.Dashboard" -c Release -v q -nologo >/dev/null
   dotnet build "$root/samples/ErrorLensLLM.Demo" -c Release -v q -nologo >/dev/null

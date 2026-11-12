@@ -1,4 +1,5 @@
 ﻿using System.Globalization;
+using ErrorLensLLM.Experiments.Faults;
 using ErrorLensLLM.Experiments.Hdfs;
 using ErrorLensLLM.Ml.Parsing;
 
@@ -10,6 +11,8 @@ using ErrorLensLLM.Ml.Parsing;
 //   hdfs-parse [--data data/HDFS] [--report docs/experiments/hdfs-parsing.md] [--similarities 0.5,0.6,0.7,0.8,0.9]
 //              [--modes original,constanttokens] [--mask-paths false,true]
 //              [--skip-detection]
+//   faults     [--report docs/experiments/fault-injection.md] [--repetitions 3] [--baseline 20] [--fault 40]
+//              needs PostgreSQL (deploy/docker-compose.yml); uses its own database errorlens_eval and ports 5025-5200
 //   hdfs and hdfs-tune accept --similarity <threshold> (default 0.5), --similarity-mode <original|constanttokens>
 //   and --mask-paths to choose how Drain parses the log.
 
@@ -78,7 +81,19 @@ switch (args.FirstOrDefault())
         });
         return 0;
     }
+    case "faults":
+    {
+        var defaults = new FaultInjectionOptions { RepositoryRoot = Directory.GetCurrentDirectory(), ReportPath = "docs/experiments/fault-injection.md" };
+        await FaultInjectionExperiment.RunAsync(defaults with
+        {
+            ReportPath = Option("--report") ?? defaults.ReportPath,
+            Repetitions = IntOption("--repetitions") ?? defaults.Repetitions,
+            Baseline = IntOption("--baseline") is { } baseline ? TimeSpan.FromSeconds(baseline) : defaults.Baseline,
+            FaultDuration = IntOption("--fault") is { } fault ? TimeSpan.FromSeconds(fault) : defaults.FaultDuration
+        });
+        return 0;
+    }
     default:
-        Console.Error.WriteLine("Usage: ErrorLensLLM.Experiments <hdfs|hdfs-tune|hdfs-parse> [options]  (see Program.cs)");
+        Console.Error.WriteLine("Usage: ErrorLensLLM.Experiments <hdfs|hdfs-tune|hdfs-parse|faults> [options]  (see Program.cs)");
         return 1;
 }
