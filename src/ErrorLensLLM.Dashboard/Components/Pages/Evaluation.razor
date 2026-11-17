@@ -1,0 +1,161 @@
+@page "/degerlendirme"
+@inherits RefreshingPage
+@inject PostgresDashboardStore Store
+
+<PageTitle>Değerlendirme · ErrorLensLLM</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>Değerlendirme</h1>
+        <div class="sub">Geliştiricilerin doğru / yanlış kararlarına göre kök neden önerisinin isabeti</div>
+    </div>
+</div>
+
+@if (!_loaded)
+{
+    <div class="card empty">Yükleniyor…</div>
+}
+else
+{
+    var rated = _feedback.Count;
+    var top1 = _feedback.Count(f => f.Verdict == "correct");
+    var top3 = top1 + _feedback.Count(f => f.Verdict == "wrong" && f.CorrectRank is <= 3);
+
+    <div class="stats">
+        <Stat Label="Olay" Value="@DashboardFormat.Number(_total)" Hint="tespit edilen" Href="olaylar" />
+        <Stat Label="Geri bildirim" Value="@DashboardFormat.Number(rated)" Hint="@($"olayların {DashboardFormat.Rate(rated, _total)}'i")" />
+        <Stat Label="Top-1 doğruluk" Value="@DashboardFormat.Rate(top1, rated)" Hint="@($"{top1} / {rated} öneri doğru")" />
+        <Stat Label="Top-3 doğruluk" Value="@DashboardFormat.Rate(top3, rated)" Hint="gerçek kök neden ilk 3 adayda" />
+    </div>
+
+    @if (rated is > 0 and < 20)
+    {
+        <p class="foot-note" style="margin:-4px 0 16px">
+            @rated geri bildirimle bu oranlar gösterge niteliğindedir; kontrollü ölçüm için hata enjeksiyonu deneylerine
+            (<code>docs/experiments/fault-injection.md</code>) bakın.
+        </p>
+    }
+
+    <div class="grid-2">
+        <section class="card">
+            <h2>Kategori dağılımı</h2>
+            @if (_categories.Count == 0)
+            {
+                <div class="empty">Henüz olay yok.</div>
+            }
+            else
+            {
+                <table class="list">
+                    <tbody>
+                        @foreach (var row in _categories)
+                        {
+                            <tr @key="row.Category">
+                                <td>@DashboardFormat.Category(row.Category)</td>
+                                <td style="width:55%">
+                                    <div class="meter">
+                                        <div class="track"><span style="width:@(100 * row.Incidents / _categories.Max(c => c.Incidents))%"></span></div>
+                                        <span class="num">@row.Incidents</span>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </section>
+
+        <section class="card">
+            <h2>Ölçütler</h2>
+            <p class="secondary"><strong>Top-1:</strong> önerilen kök nedenin (sıralamadaki 1. aday) geliştirici tarafından doğru bulunduğu olayların oranı.</p>
+            <p class="secondary"><strong>Top-3:</strong> buna, öneri yanlış olduğu halde geliştiricinin işaretlediği gerçek kök nedenin ilk üç aday içinde yer aldığı olaylar eklenir.</p>
+            <p class="secondary" style="margin:0">Her olayın yalnız son kararı sayılır; “yanlış” denip gerçek kök neden seçilmeyen olaylar Top-3'te de yanlış kabul edilir.</p>
+        </section>
+    </div>
+
+    <section class="card flush">
+        <h2>Geri bildirimler</h2>
+        @if (rated == 0)
+        {
+            <div class="empty">
+                Henüz geri bildirim verilmedi.
+                <div class="muted">Bir olayın sayfasında “Doğru” veya “Yanlış” seçildiğinde burada görünür.</div>
+            </div>
+        }
+        else
+        {
+            <div class="scroll-x">
+                <table class="list">
+                    <thead>
+                        <tr>
+                            <th>Karar</th>
+                            <th>Olay</th>
+                            <th>Önerilen</th>
+                            <th>Gerçek kök neden</th>
+                            <th class="hide-narrow">Not</th>
+                            <th class="hide-narrow">Tarih</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in _feedback)
+                        {
+                            <tr @key="row.IncidentId">
+                                <td><Verdict Value="@row.Verdict" /></td>
+                                <td>
+                                    <a class="title" href="olaylar/@row.IncidentId">@row.Title</a>
+                                    <div class="muted small">@DashboardFormat.Category(row.Category)</div>
+                                </td>
+                                <td>@Describe(row.SuggestedApplications, row.SuggestedType)</td>
+                                <td>
+                                    @if (row.Verdict == "correct")
+                                    {
+                                        <span class="muted">önerilenle aynı</span>
+                                    }
+                                    else if (row.CorrectType is null)
+                                    {
+                                        <span class="muted">belirtilmedi</span>
+                                    }
+                                    else
+                                    {
+                                        @Describe(row.CorrectApplications, row.CorrectType)
+                                        @if (row.CorrectRank is { } rank)
+                                        {
+                                            <div class="muted small">sıralamada @rank. aday</div>
+                                        }
+                                    }
+                                </td>
+                                <td class="hide-narrow secondary">@(row.Comment ?? "—")</td>
+                                <td class="hide-narrow nowrap">@Format.Stamp(row.CreatedAt)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+}
+
+<p class="foot-note">
+    Son güncelleme @(Updated is { } u ? Format.Time(u) : "—")
+    @if (RefreshError is not null)
+    {
+        <span class="warn"> · yenileme başarısız, eski veri gösteriliyor</span>
+    }
+</p>
+
+@code {
+    private IReadOnlyList<FeedbackRow> _feedback = [];
+    private IReadOnlyList<CategoryCount> _categories = [];
+    private int _total;
+    private bool _loaded;
+
+    protected override async Task LoadAsync()
+    {
+        _feedback = await Store.FeedbackAsync(Stopping);
+        _categories = await Store.IncidentCategoriesAsync(Stopping);
+        _total = _categories.Sum(c => c.Incidents);
+        _loaded = true;
+    }
+
+    private static string Describe(IReadOnlyList<string> applications, string? type) =>
+        $"{string.Join(", ", applications)} · {DashboardFormat.ShortType(type)}";
+}

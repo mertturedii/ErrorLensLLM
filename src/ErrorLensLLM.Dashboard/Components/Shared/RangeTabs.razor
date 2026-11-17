@@ -1,0 +1,13 @@
+@* Look-back window for a screen *@
+<div class="tabs" role="tablist" aria-label="Zaman aralığı">
+    @foreach (var range in TimeRange.All)
+    {
+        <button role="tab" class="@(range == Value ? "active" : "")" aria-selected="@(range == Value)"
+                @onclick="() => ValueChanged.InvokeAsync(range)">Son @range.Label</button>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public TimeRange? Value { get; set; }
+    [Parameter] public EventCallback<TimeRange> ValueChanged { get; set; }
+}

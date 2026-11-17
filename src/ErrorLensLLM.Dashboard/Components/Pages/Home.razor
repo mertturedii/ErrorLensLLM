@@ -1,0 +1,224 @@
+@page "/"
+@inherits RefreshingPage
+@inject PostgresDashboardStore Store
+@inject DashboardSession Session
+
+<PageTitle>Genel Bakış · ErrorLensLLM</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>Genel Bakış</h1>
+        <div class="sub">Modüllerin durumu, açık olaylar ve son yayınlar</div>
+    </div>
+    <RangeTabs Value="_range" ValueChanged="SelectAsync" />
+</div>
+
+@if (_counts is null)
+{
+    <div class="card empty">Yükleniyor…</div>
+}
+else
+{
+    <div class="stats">
+        <Stat Label="Açık olay" Value="@DashboardFormat.Number(_counts.OpenIncidents)" Href="olaylar"
+              Tone="@(_counts.OpenIncidents > 0 ? "critical" : "good")"
+              Hint="@(_counts.NewIncidents > 0 ? $"bu aralıkta {_counts.NewIncidents} yeni" : "bu aralıkta yeni yok")" />
+        <Stat Label="Hata" Value="@DashboardFormat.Number(_counts.Errors)" Href="izleme"
+              Hint="@($"logların {DashboardFormat.Rate(_counts.Errors, _counts.Logs)}'i")" />
+        <Stat Label="Log" Value="@DashboardFormat.Number(_counts.Logs)" Href="izleme" Hint="@($"son {_range!.Label}")" />
+        <Stat Label="Aktif hata grubu" Value="@DashboardFormat.Number(_counts.ActiveGroups)" Href="hatalar" Hint="farklı parmak izi" />
+        <Stat Label="Deploy" Value="@DashboardFormat.Number(_counts.Deployments)" Href="deploylar" Hint="@($"son {_range.Label}")" />
+    </div>
+
+    @if (_counts.Logs == 0)
+    {
+        <div class="card empty">
+            Son @_range.Label içinde log gelmedi.
+            @if (_latest is { } latest)
+            {
+                <div class="muted">Son log: @Format.DateTime(latest)</div>
+            }
+            else
+            {
+                <div class="muted">Demo için: <code>scripts/demo.sh start</code>, ardından <code>scripts/demo.sh deploy kayit 1.1.0 kayit-missing-column</code></div>
+            }
+        </div>
+    }
+
+    <h2>Modüller</h2>
+    @if (_modules.Count == 0)
+    {
+        <div class="card empty">Henüz kendini bildiren bir modül yok.</div>
+    }
+    else
+    {
+        <div class="modules">
+            @foreach (var module in _modules)
+            {
+                var logs = Logs(module.Application);
+                var errors = Errors(module.Application);
+                var inIncident = _open.Any(i => i.Applications.Contains(module.Application));
+                <section class="card module" @key="module.Application">
+                    <div class="module-head">
+                        <span class="module-name"><span class="swatch" style="background:@Colors.Of(module.Application)"></span>@module.Application</span>
+                        @if (inIncident)
+                        {
+                            <span class="badge open"><span class="dot"></span>Olay var</span>
+                        }
+                        else if (logs == 0)
+                        {
+                            <span class="badge"><span class="dot"></span>Sessiz</span>
+                        }
+                        else if (errors > 0)
+                        {
+                            <span class="badge warn"><span class="dot"></span>Hata var</span>
+                        }
+                        else
+                        {
+                            <span class="badge good"><span class="dot"></span>Sağlıklı</span>
+                        }
+                    </div>
+                    <Spark Values="ErrorSeries(module.Application)" Wide Color="@Colors.Of(module.Application)"
+                           Label="@($"{module.Application}: son {_range.Label} içindeki hata sayısının seyri")" />
+                    <dl>
+                        <dt>Sürüm</dt>
+                        <dd>@(module.Version ?? "—") <span class="muted">· @DashboardFormat.Relative(module.DeployedAt)</span></dd>
+                        <dt>Hata</dt>
+                        <dd>@DashboardFormat.Number(errors) <span class="muted">· @DashboardFormat.Rate(errors, logs)</span></dd>
+                        <dt>Log</dt>
+                        <dd>@DashboardFormat.Number(logs)</dd>
+                    </dl>
+                </section>
+            }
+        </div>
+    }
+
+    <section class="card">
+        <div class="card-head">
+            <h2>Modül bazında hatalar</h2>
+            <a href="izleme" class="small">Log izleme →</a>
+        </div>
+        <StackedBars Points="_errorPoints" Bucket="_bucket" From="_from" To="_to" Series="_series" Color="Colors.Of"
+                     Deployments="_releases" Label="Modül bazında zaman içindeki hata sayısı"
+                     EmptyText="@($"Son {_range.Label} içinde hata yok.")" />
+    </section>
+
+    <div class="grid-2">
+        <section class="card flush">
+            <div class="card-head">
+                <h2>Açık olaylar</h2>
+                <a href="olaylar" class="small">Tümü →</a>
+            </div>
+            @if (_open.Count == 0)
+            {
+                <div class="empty">Şu an açık olay yok.</div>
+            }
+            else
+            {
+                <IncidentTable Incidents="_open.Take(5).ToList()" Compact />
+            }
+        </section>
+
+        <section class="card">
+            <div class="card-head">
+                <h2>Son deploylar</h2>
+                <a href="deploylar" class="small">Tümü →</a>
+            </div>
+            @if (_deployments.Count == 0)
+            {
+                <div class="empty">Kayıtlı deploy yok.</div>
+            }
+            else
+            {
+                <ul class="rows">
+                    @foreach (var deployment in _deployments)
+                    {
+                        <li @key="deployment.Id">
+                            <ModuleChip Name="@deployment.Application" />
+                            <strong>@(deployment.Version ?? "—")</strong>
+                            @if (deployment.IsRelease)
+                            {
+                                <span class="muted small">@deployment.PreviousVersion → @deployment.Version</span>
+                            }
+                            @if (deployment.IncidentId is { } incidentId)
+                            {
+                                <a class="badge open" href="olaylar/@incidentId"><span class="dot"></span>şüpheli</a>
+                            }
+                            <span class="end muted small nowrap">@DashboardFormat.Relative(deployment.StartedAt)</span>
+                        </li>
+                    }
+                </ul>
+            }
+        </section>
+    </div>
+}
+
+<p class="foot-note">
+    Son güncelleme @(Updated is { } u ? Format.Time(u) : "—")
+    @if (RefreshError is not null)
+    {
+        <span class="warn"> · yenileme başarısız, eski veri gösteriliyor</span>
+    }
+</p>
+
+@code {
+    private TimeRange? _range;
+    private OverviewCounts? _counts;
+    private DateTimeOffset? _latest;
+    private DateTimeOffset _from, _to;
+    private TimeSpan _bucket;
+    private IReadOnlyList<VolumePoint> _volume = [];
+    private IReadOnlyList<TimelinePoint> _errorPoints = [];
+    private IReadOnlyList<string> _series = [];
+    private IReadOnlyList<ModuleView> _modules = [];
+    private IReadOnlyList<IncidentSummary> _open = [];
+    private IReadOnlyList<DeploymentRow> _deployments = [];
+    private IReadOnlyList<DeploymentView> _releases = [];
+
+    protected override async Task LoadAsync()
+    {
+        _latest = await Store.LatestLogAsync(Stopping);
+        _range ??= Session.Range ??= TimeRange.Fit(_latest);
+
+        _bucket = PostgresDashboardStore.BucketFor(_range.Span);
+        _to = DateTimeOffset.UtcNow;
+        _from = _to - _range.Span;
+
+        _counts = await Store.OverviewAsync(_from, Stopping);
+        _volume = await Store.LogVolumeAsync(_from, _to, _bucket, Stopping);
+        var modules = await Store.ModulesAsync(Stopping);
+        _modules = Colors.Sort(modules.Select(m => m.Application)).Select(name => modules.First(m => m.Application == name)).ToList();
+        _open = await Store.ListIncidentsAsync("open", ct: Stopping);
+
+        var deployments = await Store.ListDeploymentsAsync(50, Stopping);
+        _deployments = deployments.Take(6).ToList();
+        // Only version changes are marked on the chart; restarts would bury them
+        _releases = deployments.Where(d => d.IsRelease && d.StartedAt >= _from)
+            .Select(d => new DeploymentView(d.Application, d.Version, d.CommitSha, d.StartedAt)).ToList();
+
+        _errorPoints = _volume.Where(p => DashboardFormat.IsError(p.Level))
+            .Select(p => new TimelinePoint(p.Bucket, p.Application, p.Count)).ToList();
+        _series = Colors.Sort(_errorPoints.Select(p => p.Application));
+    }
+
+    private async Task SelectAsync(TimeRange range)
+    {
+        _range = Session.Range = range;
+        await ReloadAsync();
+    }
+
+    private long Logs(string application) => _volume.Where(p => p.Application == application).Sum(p => (long)p.Count);
+
+    private long Errors(string application) =>
+        _volume.Where(p => p.Application == application && DashboardFormat.IsError(p.Level)).Sum(p => (long)p.Count);
+
+    /// <summary>Errors per bucket across the whole window, quiet buckets included.</summary>
+    private int[] ErrorSeries(string application)
+    {
+        var slots = Math.Max((int)Math.Ceiling(_range!.Span / _bucket), 1);
+        var series = new int[slots];
+        foreach (var point in _volume.Where(p => p.Application == application && DashboardFormat.IsError(p.Level)))
+            series[Math.Clamp((int)((point.Bucket - _from) / _bucket), 0, slots - 1)] += point.Count;
+        return series;
+    }
+}

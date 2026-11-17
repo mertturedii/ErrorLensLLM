@@ -1,0 +1,185 @@
+@* Counts per time bucket, stacked by series, with optional deployment markers. Inline SVG, no script. *@
+@inject DashboardFormat Format
+
+@if (Points.Count == 0)
+{
+    <div class="empty">@EmptyText</div>
+}
+else
+{
+    <div class="legend">
+        @foreach (var series in Series)
+        {
+            <span class="chip"><span class="swatch" style="background:@Color(series)"></span>@series</span>
+        }
+        @if (Deployments.Count > 0)
+        {
+            <span class="chip"><span class="deploy-swatch"></span>deploy</span>
+        }
+    </div>
+
+    <svg viewBox="0 0 @Width @Height" class="bars" role="img" aria-label="@Label; ayrıntılar aşağıdaki tabloda">
+        @* Recessive grid and axis *@
+        @foreach (var tick in YTicks)
+        {
+            var y = Y(tick);
+            <g>
+                <line x1="@Left" x2="@(Width - Right)" y1="@F(y)" y2="@F(y)" class="grid" />
+                <text x="@(Left - 6)" y="@F(y + 4)" class="tick" text-anchor="end">@DashboardFormat.Number(tick)</text>
+            </g>
+        }
+
+        @for (var b = 0; b < _buckets.Count; b++)
+        {
+            var x = Left + b * Slot;
+            var stacked = 0;
+            foreach (var series in Series)
+            {
+                var count = Count(_buckets[b], series);
+                if (count == 0)
+                    continue;
+
+                var top = Y(stacked + count);
+                var height = Y(stacked) - top;
+                stacked += count;
+                <rect x="@F(x + 1)" y="@F(top)" width="@F(Math.Max(Slot - 2, 1))" height="@F(height)"
+                      fill="@Color(series)" class="segment">
+                    <title>@series · @Format.Tick(_buckets[b], Bucket) · @DashboardFormat.Number(count) @Unit</title>
+                </rect>
+            }
+        }
+
+        <line x1="@Left" x2="@(Width - Right)" y1="@F(Y(0))" y2="@F(Y(0))" class="axis" />
+
+        @foreach (var tick in XTicks)
+        {
+            <g><text x="@F(Left + tick * Slot + Slot / 2)" y="@(Height - 8)" class="tick" text-anchor="middle">@Format.Tick(_buckets[tick], Bucket)</text></g>
+        }
+
+        @foreach (var deployment in Deployments.Where(d => d.StartedAt >= _buckets[0] && d.StartedAt <= _end))
+        {
+            var x = Left + (deployment.StartedAt - _buckets[0]) / Bucket * Slot;
+            var suspected = deployment == Highlighted;
+            <g>
+                <line x1="@F(x)" x2="@F(x)" y1="@Top" y2="@F(Y(0))" class="@(suspected ? "deploy suspected" : "deploy")">
+                    <title>@deployment.Application @deployment.Version · @Format.Time(deployment.StartedAt)</title>
+                </line>
+                @* Only the suspected trigger is labelled; releases often land together and their labels would collide *@
+                @if (suspected)
+                {
+                    <g><text x="@F(x + 4)" y="@(Top + 10)" class="deploy-label">@deployment.Application @deployment.Version</text></g>
+                }
+            </g>
+        }
+    </svg>
+
+    <details>
+        <summary>Tablo olarak göster</summary>
+        <div class="scroll-x">
+            <table class="list">
+                <thead>
+                    <tr>
+                        <th>Zaman</th>
+                        @foreach (var series in Series)
+                        {
+                            <th class="num">@series</th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var bucket in _buckets.Where(b => Series.Any(s => Count(b, s) > 0)))
+                    {
+                        <tr>
+                            <td class="num left">@Format.Tick(bucket, Bucket)</td>
+                            @foreach (var series in Series)
+                            {
+                                <td class="num">@DashboardFormat.Number(Count(bucket, series))</td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </details>
+}
+
+@code {
+    private const int Width = 800, Height = 220, Left = 48, Right = 12, Top = 14, Bottom = 30;
+
+    /// <summary><see cref="TimelinePoint.Application"/> is the series name; it need not be an application.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<TimelinePoint> Points { get; set; } = [];
+    [Parameter, EditorRequired] public TimeSpan Bucket { get; set; }
+
+    /// <summary>Stacking order, bottom first. Fixed by the caller so a series keeps its place and color between refreshes.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<string> Series { get; set; } = [];
+
+    /// <summary>CSS color of a series.</summary>
+    [Parameter, EditorRequired] public Func<string, string> Color { get; set; } = _ => "var(--series-other)";
+
+    /// <summary>Start of the first bucket when the chart covers a fixed window; otherwise it starts at the first point.</summary>
+    [Parameter] public DateTimeOffset? From { get; set; }
+    [Parameter] public DateTimeOffset? To { get; set; }
+
+    [Parameter] public IReadOnlyList<DeploymentView> Deployments { get; set; } = [];
+
+    /// <summary>The suspected deployment; drawn stronger and labelled.</summary>
+    [Parameter] public DeploymentView? Highlighted { get; set; }
+
+    [Parameter] public string Unit { get; set; } = "hata";
+    [Parameter] public string Label { get; set; } = "Zaman içindeki hata sayısı";
+    [Parameter] public string EmptyText { get; set; } = "Bu aralıkta veri yok.";
+
+    private List<DateTimeOffset> _buckets = [];
+    private Dictionary<(DateTimeOffset, string), int> _counts = [];
+    private DateTimeOffset _end;
+    private int _max;
+
+    private double Slot => (double)(Width - Left - Right) / Math.Max(_buckets.Count, 1);
+
+    protected override void OnParametersSet()
+    {
+        if (Points.Count == 0)
+            return;
+
+        _counts = Points.GroupBy(p => (p.Bucket, p.Application)).ToDictionary(g => g.Key, g => g.Sum(p => p.Errors));
+        var first = From ?? Points.Min(p => p.Bucket);
+        var last = To is { } to ? to - Bucket : Points.Max(p => p.Bucket);
+
+        // Every bucket gets a slot, empty ones included, so quiet stretches stay visible
+        _buckets = [];
+        for (var b = first; b <= last; b += Bucket)
+            _buckets.Add(b);
+        if (_buckets.Count == 0)
+            _buckets.Add(first);
+        _end = _buckets[^1] + Bucket;
+
+        _max = _buckets.Max(b => Series.Sum(s => Count(b, s)));
+    }
+
+    private int Count(DateTimeOffset bucket, string series) => _counts.GetValueOrDefault((bucket, series));
+
+    private double Y(double value) => Top + (Height - Top - Bottom) * (1 - value / NiceMax);
+
+    private int NiceMax
+    {
+        get
+        {
+            var magnitude = Math.Pow(10, Math.Floor(Math.Log10(Math.Max(_max, 1))));
+            var step = new[] { 0.5, 1, 2, 2.5, 5, 10 }.First(s => s * magnitude * 4 >= _max) * magnitude;
+            return (int)Math.Max(step * 4, 4);
+        }
+    }
+
+    private IEnumerable<int> YTicks => Enumerable.Range(0, 5).Select(i => NiceMax * i / 4).Distinct();
+
+    private IEnumerable<int> XTicks
+    {
+        get
+        {
+            var every = Math.Max(1, (int)Math.Ceiling(_buckets.Count / 6.0));
+            return Enumerable.Range(0, _buckets.Count).Where(i => i % every == 0);
+        }
+    }
+
+    private static string F(double value) => value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+}

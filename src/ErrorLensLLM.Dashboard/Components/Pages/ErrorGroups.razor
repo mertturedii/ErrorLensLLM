@@ -1,0 +1,134 @@
+@page "/hatalar"
+@inherits RefreshingPage
+@inject PostgresDashboardStore Store
+@inject NavigationManager Navigation
+
+<PageTitle>Hata Grupları · ErrorLensLLM</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>Hata Grupları</h1>
+        <div class="sub">Aynı parmak izine (tür + normalleştirilmiş mesaj + kod konumu) sahip hatalar tek grupta sayılır</div>
+    </div>
+</div>
+
+<div class="filters">
+    <input type="search" placeholder="Tür, mesaj veya kod konumunda ara" aria-label="Hata gruplarında ara" @bind="_search" @bind:event="oninput" />
+    <select aria-label="Modül" @bind="_module">
+        <option value="">Tüm modüller</option>
+        @foreach (var module in Colors.Sort(_groups.SelectMany(g => g.Applications)))
+        {
+            <option value="@module">@module</option>
+        }
+    </select>
+    @if (_loaded)
+    {
+        <span class="count">@Visible.Count grup</span>
+    }
+</div>
+
+<div class="card flush">
+    @if (!_loaded)
+    {
+        <div class="empty">Yükleniyor…</div>
+    }
+    else if (_groups.Count == 0)
+    {
+        <div class="empty">Henüz hata kaydı yok.</div>
+    }
+    else if (Visible.Count == 0)
+    {
+        <div class="empty">Bu filtrelere uyan hata grubu yok.</div>
+    }
+    else
+    {
+        <div class="scroll-x">
+            <table class="list">
+                <thead>
+                    <tr>
+                        <th>Hata</th>
+                        <th class="hide-narrow">Kategori</th>
+                        <th>Modüller</th>
+                        <th class="num">Sayı</th>
+                        <th class="hide-narrow">Son görülme</th>
+                        <th class="hide-narrow">Olay</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var group in Visible)
+                    {
+                        <tr class="clickable" @key="group.Fingerprint" @onclick="() => Navigation.NavigateTo(Link(group))">
+                            <td>
+                                <a class="title" href="@Link(group)" @onclick:stopPropagation>@DashboardFormat.ShortType(group.ExceptionType)</a>
+                                <div class="mono secondary">@group.NormalizedMessage</div>
+                                @if (group.TopFrame is not null)
+                                {
+                                    <div class="muted small"><code>@group.TopFrame</code></div>
+                                }
+                            </td>
+                            <td class="hide-narrow">@DashboardFormat.Category(group.Category)</td>
+                            <td>
+                                <div class="chips">
+                                    @foreach (var app in Colors.Sort(group.Applications))
+                                    {
+                                        <ModuleChip Name="@app" />
+                                    }
+                                </div>
+                            </td>
+                            <td class="num">@DashboardFormat.Number(group.Occurrences)</td>
+                            <td class="hide-narrow nowrap">
+                                @DashboardFormat.Relative(group.LastSeen)
+                                <div class="muted small">ilk: @Format.Stamp(group.FirstSeen)</div>
+                            </td>
+                            <td class="hide-narrow">
+                                @if (group.IncidentId is { } incidentId)
+                                {
+                                    <a class="badge @group.IncidentStatus" href="olaylar/@incidentId" title="@group.IncidentTitle" @onclick:stopPropagation>
+                                        <span class="dot"></span>@DashboardFormat.Status(group.IncidentStatus!)
+                                    </a>
+                                }
+                                else
+                                {
+                                    <span class="muted">—</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+<p class="foot-note">
+    Son güncelleme @(Updated is { } u ? Format.Time(u) : "—")
+    @if (RefreshError is not null)
+    {
+        <span class="warn"> · yenileme başarısız, eski veri gösteriliyor</span>
+    }
+</p>
+
+@code {
+    private IReadOnlyList<ErrorGroupView> _groups = [];
+    private bool _loaded;
+    private string _search = "";
+    private string _module = "";
+
+    private IReadOnlyList<ErrorGroupView> Visible => _groups
+        .Where(g => _module.Length == 0 || g.Applications.Contains(_module))
+        .Where(g => _search.Length == 0 || Matches(g, _search.Trim()))
+        .ToList();
+
+    protected override async Task LoadAsync()
+    {
+        _groups = await Store.ListErrorGroupsAsync(ct: Stopping);
+        _loaded = true;
+    }
+
+    private static bool Matches(ErrorGroupView group, string text) =>
+        group.ExceptionType.Contains(text, StringComparison.OrdinalIgnoreCase)
+        || group.NormalizedMessage.Contains(text, StringComparison.OrdinalIgnoreCase)
+        || (group.TopFrame?.Contains(text, StringComparison.OrdinalIgnoreCase) ?? false);
+
+    private static string Link(ErrorGroupView group) => $"hatalar/{group.Fingerprint}";
+}

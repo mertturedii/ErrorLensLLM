@@ -1,0 +1,129 @@
+@page "/hatalar/{Fingerprint}"
+@inherits RefreshingPage
+@inject PostgresDashboardStore Store
+
+<PageTitle>@(_group is null ? "Hata grubu" : DashboardFormat.ShortType(_group.ExceptionType)) · ErrorLensLLM</PageTitle>
+
+<div class="crumb"><a href="hatalar">← Hata Grupları</a></div>
+
+@if (_loaded && _group is null)
+{
+    <div class="card empty">Hata grubu bulunamadı.</div>
+}
+else if (_group is { } group)
+{
+    var applications = Colors.Sort(group.Applications);
+
+    <div class="page-head">
+        <div>
+            <h1>@DashboardFormat.ShortType(group.ExceptionType)</h1>
+            <div class="mono secondary" style="margin-top:6px">@group.NormalizedMessage</div>
+            <div class="meta">
+                <span>@DashboardFormat.Category(group.Category)</span>
+                <span class="chips">
+                    @foreach (var app in applications)
+                    {
+                        <ModuleChip Name="@app" />
+                    }
+                </span>
+                @if (group.TopFrame is not null)
+                {
+                    <span>Kod konumu: <code>@group.TopFrame</code></span>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="stats">
+        <Stat Label="Toplam" Value="@DashboardFormat.Number(group.Occurrences)" Hint="oluşum" />
+        <Stat Label="İlk görülme" Value="@Format.Stamp(group.FirstSeen)" Hint="@DashboardFormat.Relative(group.FirstSeen)" Text />
+        <Stat Label="Son görülme" Value="@Format.Stamp(group.LastSeen)" Hint="@DashboardFormat.Relative(group.LastSeen)" Text />
+        <Stat Label="Olay" Value="@_incidents.Count.ToString()" Hint="bu grubu içeren" />
+    </div>
+
+    <section class="card">
+        <h2>Zaman çizelgesi</h2>
+        <StackedBars Points="_timeline" Bucket="_bucket" Series="applications" Color="Colors.Of"
+                     Label="Bu hata grubunun zaman içindeki oluşum sayısı" />
+    </section>
+
+    <section class="card flush">
+        <h2>Bağlı olaylar</h2>
+        @if (_incidents.Count == 0)
+        {
+            <div class="empty">Bu grup henüz bir olaya bağlanmadı.</div>
+        }
+        else
+        {
+            <IncidentTable Incidents="_incidents" />
+        }
+    </section>
+
+    <section class="card">
+        <h2>Örnek stack trace</h2>
+        @if (_stack is null)
+        {
+            <div class="secondary">Bu grup exception fırlatmadan loglanan hatalardan oluşuyor; stack trace yok.</div>
+        }
+        else
+        {
+            <pre class="stack">@_stack</pre>
+        }
+    </section>
+
+    <section class="card flush">
+        <h2>Son oluşumlar</h2>
+        <div class="scroll-x">
+            <table class="list">
+                <thead>
+                    <tr>
+                        <th>Zaman</th>
+                        <th>Modül</th>
+                        <th>Mesaj</th>
+                        <th class="hide-narrow">Trace</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var e in _events)
+                    {
+                        <tr>
+                            <td class="nowrap">@Format.DateTime(e.Timestamp)</td>
+                            <td><ModuleChip Name="@e.Application" /></td>
+                            <td class="secondary">@(e.ExceptionMessage ?? e.Message)</td>
+                            <td class="hide-narrow"><code class="muted">@(e.TraceId?[..Math.Min(8, e.TraceId.Length)])</code></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}
+else
+{
+    <div class="card empty">Yükleniyor…</div>
+}
+
+@code {
+    [Parameter] public string Fingerprint { get; set; } = "";
+
+    private ErrorGroupView? _group;
+    private bool _loaded;
+    private TimeSpan _bucket;
+    private IReadOnlyList<TimelinePoint> _timeline = [];
+    private IReadOnlyList<IncidentSummary> _incidents = [];
+    private IReadOnlyList<LogEventView> _events = [];
+    private string? _stack;
+
+    protected override async Task LoadAsync()
+    {
+        _group = (await Store.ListErrorGroupsAsync(Fingerprint, 1, Stopping)).FirstOrDefault();
+        _loaded = true;
+        if (_group is null)
+            return;
+
+        (_bucket, _timeline) = await Store.GroupTimelineAsync(_group, Stopping);
+        _incidents = await Store.IncidentsOfGroupAsync(Fingerprint, Stopping);
+        _events = await Store.GroupEventsAsync(Fingerprint, 10, Stopping);
+        _stack = await Store.SampleStackTraceAsync(Fingerprint, Stopping);
+    }
+}

@@ -1,0 +1,24 @@
+@* Tiny bar series without axes: the shape of a count over time, read next to the number it belongs to *@
+<svg class="spark @(Wide ? "wide" : "")" viewBox="0 0 @(Values.Count * 4) 24" preserveAspectRatio="none" role="img"
+     aria-label="@Label" style="@(Color is null ? null : $"color:{Color}")">
+    <line x1="0" x2="@(Values.Count * 4)" y1="23.5" y2="23.5" class="base" />
+    @for (var i = 0; i < Values.Count; i++)
+    {
+        if (Values[i] > 0)
+        {
+            var height = Math.Max(22.0 * Values[i] / Max, 1.5);
+            <rect x="@F(i * 4 + 0.5)" y="@F(23 - height)" width="3" height="@F(height)" />
+        }
+    }
+</svg>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<int> Values { get; set; } = [];
+    [Parameter] public string Label { get; set; } = "Zaman içindeki dağılım";
+    [Parameter] public string? Color { get; set; }
+    [Parameter] public bool Wide { get; set; }
+
+    private int Max => Math.Max(Values.Count == 0 ? 1 : Values.Max(), 1);
+
+    private static string F(double value) => value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+}

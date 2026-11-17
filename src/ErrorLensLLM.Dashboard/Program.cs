@@ -17,6 +17,8 @@ builder.Services.AddSingleton<PostgresLogStore>();
 builder.Services.AddSingleton<PostgresIncidentStore>();
 builder.Services.AddSingleton<PostgresDashboardStore>();
 builder.Services.AddSingleton<DashboardFormat>();
+builder.Services.AddSingleton<ModuleColors>();
+builder.Services.AddScoped<DashboardSession>();
 
 var app = builder.Build();
 

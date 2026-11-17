@@ -24,7 +24,7 @@ public sealed record LogEventView(
 public sealed record FeedbackView(string Verdict, string? CorrectFingerprint, string? Comment, DateTimeOffset CreatedAt);
 
 /// <summary>Read side for the dashboard, plus the developer feedback it records.</summary>
-public sealed class PostgresDashboardStore(NpgsqlDataSource dataSource)
+public sealed partial class PostgresDashboardStore(NpgsqlDataSource dataSource)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
 

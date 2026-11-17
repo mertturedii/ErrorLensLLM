@@ -196,16 +196,29 @@ every 2 s.
 
 `src/ErrorLensLLM.Dashboard` (Blazor Server, http://localhost:5200, started by `scripts/demo.sh`) reads the same database:
 
-- **Incidents:** open, closed or all; refreshes every 10 s.
+- **Overview (`/`):** open incidents, errors, log volume and deployments in the chosen window (15 min to 7 days), one
+  card per module (running version, error rate, error sparkline), errors per module over time with release markers.
+- **Incidents (`/olaylar`):** open, closed or all; search, category and module filters; a sparkline of each incident.
 - **Incident detail:**
-  - the root cause with its evidence and the suspected deployment (version, commit);
+  - the root cause with its evidence, and how far ahead of the second candidate it scored;
   - a timeline of errors per module with deployment markers, and a table view;
   - every root cause candidate with its score;
-  - one request chain showing how the failure spread across modules;
-  - the latest errors.
+  - one request chain showing how the failure spread across modules, and the latest errors;
+  - the suspected deployment (version, commit) and the feedback form, kept in view beside the rest.
+- **Error groups (`/hatalar`):** every fingerprint with its count, modules, category and the incident it belongs to;
+  the group page adds its timeline, a sample stack trace and the latest occurrences.
+- **Deployments (`/deploylar`):** the history per module, which ones changed the version (only those can be
+  suspected), errors logged under each, and the incident a deployment is suspected of.
+- **Log monitoring (`/izleme`):** all logs, not only errors: volume by level, error rate per module, the log templates
+  seen in the window (new ones flagged) and a searchable tail. These are counts; the DeepLog and Isolation Forest
+  scores are computed in the offline experiments only and are not wired to the live stream.
+- **Evaluation (`/degerlendirme`):** Top-1 and Top-3 accuracy of the suggested root cause from developer verdicts.
 - **Feedback:** developers mark the suggested root cause correct or wrong, and can pick the real one.
   Verdicts are stored with the suggestion they judged (`incident_feedback`), which makes them evaluation data for the
   correlator.
+
+Every screen refreshes every 10 s, follows the system light/dark preference (with a toggle), and collapses the side
+menu into a top strip on narrow screens.
 
 ## Repository layout
 
@@ -217,7 +230,7 @@ every 2 s.
 | `tests/` | Unit tests for Core and Ml | ✅ |
 | `src/ErrorLensLLM.Serilog` | Serilog sink that sends logs to the collector | ✅ |
 | `src/ErrorLensLLM.Collector` | Ingestion API: masking, templating, fingerprinting | ✅ |
-| `src/ErrorLensLLM.Dashboard` | Blazor Server dashboard: incidents, root cause, timeline, feedback | ✅ |
+| `src/ErrorLensLLM.Dashboard` | Blazor Server dashboard: overview, incidents, error groups, deployments, log monitoring, evaluation | ✅ |
 | `src/ErrorLensLLM.Storage.PostgreSql` | Central log and incident store | ✅ logs, ⏳ incidents |
 | `src/ErrorLensLLM.AI.Claude` | LLM explanation of incidents | planned |
 | `src/ErrorLensLLM.Source.Bitbucket` | Fetches source code at the deployed commit for root cause context | planned |

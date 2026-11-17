@@ -1,0 +1,142 @@
+@page "/deploylar"
+@inherits RefreshingPage
+@inject PostgresDashboardStore Store
+
+<PageTitle>Deploylar · ErrorLensLLM</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>Deploylar</h1>
+        <div class="sub">Her modül açılışta sürümünü bildirir; yalnız sürüm değiştiren deploy bir olayın şüphelisi olabilir</div>
+    </div>
+    <div class="tabs" role="tablist" aria-label="Tür">
+        <button role="tab" class="@(!_releasesOnly ? "active" : "")" aria-selected="@(!_releasesOnly)" @onclick="() => _releasesOnly = false">Tümü</button>
+        <button role="tab" class="@(_releasesOnly ? "active" : "")" aria-selected="@_releasesOnly" @onclick="() => _releasesOnly = true">Yalnız yayınlar</button>
+    </div>
+</div>
+
+@if (_loaded)
+{
+    <div class="stats">
+        <Stat Label="Deploy" Value="@DashboardFormat.Number(_deployments.Count)" Hint="kayıtlı" />
+        <Stat Label="Yayın" Value="@DashboardFormat.Number(_deployments.Count(d => d.IsRelease))" Hint="sürüm değişti" />
+        <Stat Label="Şüpheli" Value="@DashboardFormat.Number(_deployments.Count(d => d.IncidentId is not null))" Hint="bir olaya bağlandı"
+              Tone="@(_deployments.Any(d => d.IncidentId is not null) ? "critical" : null)" />
+    </div>
+}
+
+<div class="filters">
+    <select aria-label="Modül" @bind="_module">
+        <option value="">Tüm modüller</option>
+        @foreach (var module in Colors.Sort(_deployments.Select(d => d.Application)))
+        {
+            <option value="@module">@module</option>
+        }
+    </select>
+    @if (_loaded)
+    {
+        <span class="count">@Visible.Count deploy</span>
+    }
+</div>
+
+<div class="card flush">
+    @if (!_loaded)
+    {
+        <div class="empty">Yükleniyor…</div>
+    }
+    else if (Visible.Count == 0)
+    {
+        <div class="empty">@(_deployments.Count == 0 ? "Kayıtlı deploy yok." : "Bu filtrelere uyan deploy yok.")</div>
+    }
+    else
+    {
+        <div class="scroll-x">
+            <table class="list">
+                <thead>
+                    <tr>
+                        <th>Zaman</th>
+                        <th>Modül</th>
+                        <th>Sürüm</th>
+                        <th>Tür</th>
+                        <th class="hide-narrow">Commit</th>
+                        <th class="hide-narrow">Ortam</th>
+                        <th class="num">Hata</th>
+                        <th>Olay</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var deployment in Visible)
+                    {
+                        <tr @key="deployment.Id">
+                            <td class="nowrap">
+                                @Format.Stamp(deployment.StartedAt)
+                                <div class="muted small">@DashboardFormat.Relative(deployment.StartedAt)</div>
+                            </td>
+                            <td><ModuleChip Name="@deployment.Application" /></td>
+                            <td class="nowrap">
+                                <strong>@(deployment.Version ?? "—")</strong>
+                                @if (deployment.IsRelease)
+                                {
+                                    <div class="muted small">önceki @deployment.PreviousVersion</div>
+                                }
+                            </td>
+                            <td>
+                                @if (deployment.IsRelease)
+                                {
+                                    <span class="badge accent"><span class="dot"></span>Yayın</span>
+                                }
+                                else if (deployment.PreviousVersion is null)
+                                {
+                                    <span class="badge"><span class="dot"></span>İlk kayıt</span>
+                                }
+                                else
+                                {
+                                    <span class="badge"><span class="dot"></span>Yeniden başlatma</span>
+                                }
+                            </td>
+                            <td class="hide-narrow"><code>@DashboardFormat.ShortCommit(deployment.CommitSha)</code></td>
+                            <td class="hide-narrow secondary">@(deployment.Environment ?? "—")</td>
+                            <td class="num">@DashboardFormat.Number(deployment.Errors)</td>
+                            <td>
+                                @if (deployment.IncidentId is { } incidentId)
+                                {
+                                    <a class="badge open" href="olaylar/@incidentId" title="@deployment.IncidentTitle"><span class="dot"></span>şüpheli</a>
+                                }
+                                else
+                                {
+                                    <span class="muted">—</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+<p class="foot-note">
+    “Hata” sütunu, modül bu deploy ile çalışırken kaydedilen hata sayısıdır. Son güncelleme @(Updated is { } u ? Format.Time(u) : "—")
+    @if (RefreshError is not null)
+    {
+        <span class="warn"> · yenileme başarısız, eski veri gösteriliyor</span>
+    }
+</p>
+
+@code {
+    private IReadOnlyList<DeploymentRow> _deployments = [];
+    private bool _loaded;
+    private bool _releasesOnly;
+    private string _module = "";
+
+    private IReadOnlyList<DeploymentRow> Visible => _deployments
+        .Where(d => !_releasesOnly || d.IsRelease)
+        .Where(d => _module.Length == 0 || d.Application == _module)
+        .ToList();
+
+    protected override async Task LoadAsync()
+    {
+        _deployments = await Store.ListDeploymentsAsync(ct: Stopping);
+        _loaded = true;
+    }
+}

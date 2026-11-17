@@ -1,0 +1,83 @@
+@* Incident rows, shared by the overview, the incident list and an error group's page *@
+@inject DashboardFormat Format
+@inject NavigationManager Navigation
+
+<div class="scroll-x">
+    <table class="list">
+        <thead>
+            <tr>
+                <th>Durum</th>
+                <th>Olay</th>
+                @if (!Compact)
+                {
+                    <th class="hide-narrow">Modüller</th>
+                }
+                <th>Başladı</th>
+                @if (Sparks is not null)
+                {
+                    <th class="hide-narrow">Seyir</th>
+                }
+                <th class="num">Hata</th>
+                @if (!Compact)
+                {
+                    <th class="hide-narrow">Geri bildirim</th>
+                }
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var incident in Incidents)
+            {
+                <tr class="clickable" @key="incident.Id" @onclick="() => Navigation.NavigateTo(Link(incident))">
+                    <td><span class="badge @incident.Status"><span class="dot"></span>@DashboardFormat.Status(incident.Status)</span></td>
+                    <td>
+                        <a class="title" href="@Link(incident)" @onclick:stopPropagation>@incident.Title</a>
+                        <div class="muted small">@DashboardFormat.Category(incident.Category)</div>
+                    </td>
+                    @if (!Compact)
+                    {
+                        <td class="hide-narrow">
+                            <div class="chips">
+                                @foreach (var app in Colors.Sort(incident.Applications))
+                                {
+                                    <ModuleChip Name="@app" />
+                                }
+                            </div>
+                        </td>
+                    }
+                    <td class="nowrap">
+                        @Format.Stamp(incident.StartedAt)
+                        <div class="muted small">@DashboardFormat.Duration(incident.LastSeen - incident.StartedAt) sürdü</div>
+                    </td>
+                    @if (Sparks is not null)
+                    {
+                        <td class="hide-narrow">
+                            @if (Sparks.TryGetValue(incident.Id, out var values))
+                            {
+                                <Spark Values="values" Label="Olay boyunca hata sayısının seyri" />
+                            }
+                        </td>
+                    }
+                    <td class="num">@DashboardFormat.Number(incident.Occurrences)</td>
+                    @if (!Compact)
+                    {
+                        <td class="hide-narrow"><Verdict Value="@incident.Verdict" /></td>
+                    }
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    [Inject] private ModuleColors Colors { get; set; } = default!;
+
+    [Parameter, EditorRequired] public IReadOnlyList<IncidentSummary> Incidents { get; set; } = [];
+
+    /// <summary>Error counts over each incident's duration; the column is left out when null.</summary>
+    [Parameter] public IReadOnlyDictionary<Guid, int[]>? Sparks { get; set; }
+
+    /// <summary>For half-width cards: leaves out the module and feedback columns.</summary>
+    [Parameter] public bool Compact { get; set; }
+
+    private static string Link(IncidentSummary incident) => $"olaylar/{incident.Id}";
+}

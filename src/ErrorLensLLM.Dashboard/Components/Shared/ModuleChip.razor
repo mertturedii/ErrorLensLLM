@@ -1,0 +1,8 @@
+@* An application name with its dashboard-wide color *@
+@inject ModuleColors Colors
+
+<span class="chip"><span class="swatch" style="background:@Colors.Of(Name)"></span>@Name</span>
+
+@code {
+    [Parameter, EditorRequired] public string Name { get; set; } = "";
+}

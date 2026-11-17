@@ -1,0 +1,296 @@
+@page "/izleme"
+@inherits RefreshingPage
+@inject PostgresDashboardStore Store
+@inject DashboardSession Session
+
+<PageTitle>Log İzleme · ErrorLensLLM</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>Log İzleme</h1>
+        <div class="sub">Yalnız hatalar değil, toplanan tüm loglar: hacim, hata oranı ve log şablonları</div>
+    </div>
+    <RangeTabs Value="_range" ValueChanged="SelectAsync" />
+</div>
+
+@if (_range is null)
+{
+    <div class="card empty">Yükleniyor…</div>
+}
+else
+{
+    var total = _volume.Sum(p => (long)p.Count);
+    var errors = _volume.Where(p => DashboardFormat.IsError(p.Level)).Sum(p => (long)p.Count);
+    var warnings = _volume.Where(p => p.Level == "Warning").Sum(p => (long)p.Count);
+
+    <div class="stats">
+        <Stat Label="Log" Value="@DashboardFormat.Number(total)" Hint="@($"son {_range.Label}")" />
+        <Stat Label="Hata oranı" Value="@DashboardFormat.Rate(errors, total)" Hint="@($"{DashboardFormat.Number(errors)} hata")" />
+        <Stat Label="Uyarı" Value="@DashboardFormat.Number(warnings)" />
+        <Stat Label="Aktif şablon" Value="@DashboardFormat.Number(_templates.Count)" Hint="bu aralıkta log üreten" />
+        <Stat Label="Yeni şablon" Value="@DashboardFormat.Number(_templates.Count(IsNew))" Hint="ilk kez bu aralıkta görüldü"
+              Tone="@(_templates.Any(IsNew) ? "warning" : null)" />
+    </div>
+
+    <section class="card">
+        <h2>Seviye bazında log hacmi</h2>
+        <StackedBars Points="_levelPoints" Bucket="_bucket" From="_from" To="_to" Series="_levels" Color="LevelColor" Unit="log"
+                     Label="Seviye bazında zaman içindeki log sayısı" EmptyText="@($"Son {_range.Label} içinde log gelmedi.")" />
+    </section>
+
+    <section class="card flush">
+        <h2>Modüller</h2>
+        @if (_modules.Count == 0)
+        {
+            <div class="empty">Bu aralıkta log gönderen modül yok.</div>
+        }
+        else
+        {
+            <div class="scroll-x">
+                <table class="list">
+                    <thead>
+                        <tr>
+                            <th>Modül</th>
+                            <th class="num">Log</th>
+                            <th class="num">Uyarı</th>
+                            <th class="num">Hata</th>
+                            <th>Hata oranı</th>
+                            <th class="hide-narrow">Hata seyri</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var module in _modules)
+                        {
+                            <tr @key="module.Name">
+                                <td><ModuleChip Name="@module.Name" /></td>
+                                <td class="num">@DashboardFormat.Number(module.Logs)</td>
+                                <td class="num">@DashboardFormat.Number(module.Warnings)</td>
+                                <td class="num">@DashboardFormat.Number(module.Errors)</td>
+                                <td>
+                                    <div class="meter critical">
+                                        <div class="track"><span style="width:@(module.Logs == 0 ? 0 : 100 * module.Errors / module.Logs)%"></span></div>
+                                        <span class="num">@DashboardFormat.Rate(module.Errors, module.Logs)</span>
+                                    </div>
+                                </td>
+                                <td class="hide-narrow"><Spark Values="module.Series" Label="@($"{module.Name} hata sayısının seyri")" /></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+
+    <section class="card flush">
+        <h2>Log şablonları</h2>
+        @if (_templates.Count == 0)
+        {
+            <div class="empty">Bu aralıkta log yok.</div>
+        }
+        else
+        {
+            <div class="scroll-x">
+                <table class="list">
+                    <thead>
+                        <tr>
+                            <th>Şablon</th>
+                            <th class="hide-narrow">Modüller</th>
+                            <th class="num">Log</th>
+                            <th class="num">Hata</th>
+                            <th class="hide-narrow">İlk görülme</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var template in _templates)
+                        {
+                            <tr @key="template.Id">
+                                <td>
+                                    <span class="mono">@template.Text</span>
+                                    <div class="muted small">@(template.Source == "template" ? "Serilog mesaj şablonu" : "Drain ile çıkarıldı")</div>
+                                </td>
+                                <td class="hide-narrow">
+                                    <div class="chips">
+                                        @foreach (var app in Colors.Sort(template.Applications))
+                                        {
+                                            <ModuleChip Name="@app" />
+                                        }
+                                    </div>
+                                </td>
+                                <td class="num">@DashboardFormat.Number(template.Count)</td>
+                                <td class="num">@DashboardFormat.Number(template.Errors)</td>
+                                <td class="hide-narrow nowrap">
+                                    @Format.Stamp(template.FirstSeen)
+                                    @if (IsNew(template))
+                                    {
+                                        <div><span class="badge warn"><span class="dot"></span>yeni</span></div>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+
+    <section class="card flush">
+        <div class="card-head">
+            <h2>Son loglar</h2>
+        </div>
+        <div class="filters" style="padding:0 18px">
+            <input type="search" placeholder="Mesajda ara" aria-label="Mesajda ara" @bind="_search" @bind:after="ReloadAsync" />
+            <select aria-label="Modül" @bind="_module" @bind:after="ReloadAsync">
+                <option value="">Tüm modüller</option>
+                @foreach (var module in _modules)
+                {
+                    <option value="@module.Name">@module.Name</option>
+                }
+            </select>
+            <select aria-label="Seviye" @bind="_level" @bind:after="ReloadAsync">
+                <option value="">Tüm seviyeler</option>
+                @foreach (var level in new[] { "Fatal", "Error", "Warning", "Information", "Debug" })
+                {
+                    <option value="@level">@DashboardFormat.Level(level)</option>
+                }
+            </select>
+            <span class="count">son @_logs.Count kayıt</span>
+        </div>
+        @if (_logs.Count == 0)
+        {
+            <div class="empty">Bu filtrelere uyan log yok.</div>
+        }
+        else
+        {
+            <div class="scroll-x scroll-y">
+                <table class="list">
+                    <thead>
+                        <tr>
+                            <th>Zaman</th>
+                            <th>Seviye</th>
+                            <th>Modül</th>
+                            <th>Mesaj</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var e in _logs)
+                        {
+                            <tr>
+                                <td class="nowrap">@Format.Stamp(e.Timestamp)</td>
+                                <td><span class="badge @LevelBadge(e.Level)"><span class="dot"></span>@DashboardFormat.Level(e.Level)</span></td>
+                                <td><ModuleChip Name="@e.Application" /></td>
+                                <td>
+                                    @e.Message
+                                    @if (e.ExceptionType is not null)
+                                    {
+                                        <div class="secondary small">
+                                            @if (e.Fingerprint is not null)
+                                            {
+                                                <a href="hatalar/@e.Fingerprint">@DashboardFormat.ShortType(e.ExceptionType)</a>
+                                            }
+                                            else
+                                            {
+                                                @DashboardFormat.ShortType(e.ExceptionType)
+                                            }
+                                            · @e.ExceptionMessage
+                                        </div>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+
+    <p class="foot-note">
+        Bu ekran sayıma dayalı izleme gösterir. DeepLog ve Isolation Forest anomali skorları şu an yalnız çevrimdışı deneylerde
+        hesaplanıyor (<code>docs/experiments</code>); canlı akışa bağlanmadı.
+        Son güncelleme @(Updated is { } u ? Format.Time(u) : "—")
+        @if (RefreshError is not null)
+        {
+            <span class="warn"> · yenileme başarısız, eski veri gösteriliyor</span>
+        }
+    </p>
+}
+
+@code {
+    private sealed record ModuleStats(string Name, long Logs, long Warnings, long Errors, int[] Series);
+
+    private const string ErrorSeries = "Hata", WarningSeries = "Uyarı", InfoSeries = "Bilgi", OtherSeries = "Diğer";
+
+    private TimeRange? _range;
+    private DateTimeOffset _from, _to;
+    private TimeSpan _bucket;
+    private IReadOnlyList<VolumePoint> _volume = [];
+    private IReadOnlyList<TimelinePoint> _levelPoints = [];
+    private IReadOnlyList<string> _levels = [];
+    private IReadOnlyList<ModuleStats> _modules = [];
+    private IReadOnlyList<TemplateView> _templates = [];
+    private IReadOnlyList<LogEventView> _logs = [];
+    private string _search = "";
+    private string _module = "";
+    private string _level = "";
+
+    protected override async Task LoadAsync()
+    {
+        _range ??= Session.Range ??= TimeRange.Fit(await Store.LatestLogAsync(Stopping));
+
+        _bucket = PostgresDashboardStore.BucketFor(_range.Span);
+        _to = DateTimeOffset.UtcNow;
+        _from = _to - _range.Span;
+
+        _volume = await Store.LogVolumeAsync(_from, _to, _bucket, Stopping);
+        _templates = await Store.ActiveTemplatesAsync(_from, ct: Stopping);
+        _logs = await Store.RecentLogsAsync(
+            _from, _module.Length == 0 ? null : _module, _level.Length == 0 ? null : _level, _search, 50, Stopping);
+
+        _levelPoints = _volume.Select(p => new TimelinePoint(p.Bucket, SeriesOf(p.Level), p.Count)).ToList();
+        // Errors sit on the baseline, where their height is easiest to compare from bar to bar
+        _levels = new[] { ErrorSeries, WarningSeries, InfoSeries, OtherSeries }.Where(s => _levelPoints.Any(p => p.Application == s)).ToList();
+
+        var slots = Math.Max((int)Math.Ceiling(_range.Span / _bucket), 1);
+        _modules = Colors.Sort(_volume.Select(p => p.Application)).Select(name =>
+        {
+            var points = _volume.Where(p => p.Application == name).ToList();
+            var series = new int[slots];
+            foreach (var point in points.Where(p => DashboardFormat.IsError(p.Level)))
+                series[Math.Clamp((int)((point.Bucket - _from) / _bucket), 0, slots - 1)] += point.Count;
+            return new ModuleStats(
+                name, points.Sum(p => (long)p.Count), points.Where(p => p.Level == "Warning").Sum(p => (long)p.Count),
+                series.Sum(c => (long)c), series);
+        }).ToList();
+    }
+
+    private async Task SelectAsync(TimeRange range)
+    {
+        _range = Session.Range = range;
+        await ReloadAsync();
+    }
+
+    private bool IsNew(TemplateView template) => template.FirstSeen >= _from;
+
+    private static string SeriesOf(string level) => level switch
+    {
+        "Error" or "Fatal" => ErrorSeries,
+        "Warning" => WarningSeries,
+        "Information" => InfoSeries,
+        _ => OtherSeries
+    };
+
+    private static string LevelColor(string series) => series switch
+    {
+        ErrorSeries => "var(--critical)",
+        WarningSeries => "var(--warning)",
+        InfoSeries => "var(--series-1)",
+        _ => "var(--series-other)"
+    };
+
+    private static string LevelBadge(string level) => level switch
+    {
+        "Error" or "Fatal" => "bad",
+        "Warning" => "warn",
+        "Information" => "accent",
+        _ => ""
+    };
+}

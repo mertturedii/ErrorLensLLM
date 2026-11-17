@@ -1,15 +1,16 @@
-@page "/"
-@implements IDisposable
+@page "/olaylar"
+@inherits RefreshingPage
 @inject PostgresDashboardStore Store
-@inject DashboardFormat Format
-@inject NavigationManager Navigation
 
 <PageTitle>Olaylar · ErrorLensLLM</PageTitle>
 
 <div class="page-head">
-    <h1>Olaylar</h1>
-    <div class="tabs" role="tablist">
-        @foreach (var (value, label) in Filters)
+    <div>
+        <h1>Olaylar</h1>
+        <div class="sub">Aynı kök nedene bağlanan hata grupları tek olayda toplanır</div>
+    </div>
+    <div class="tabs" role="tablist" aria-label="Durum">
+        @foreach (var (value, label) in Statuses)
         {
             <button role="tab" class="@(_status == value ? "active" : "")" aria-selected="@(_status == value)"
                     @onclick="() => SelectAsync(value)">@label</button>
@@ -17,8 +18,30 @@
     </div>
 </div>
 
-<div class="card">
-    @if (_incidents is null)
+<div class="filters">
+    <input type="search" placeholder="Başlıkta ara" aria-label="Başlıkta ara" @bind="_search" @bind:event="oninput" />
+    <select aria-label="Kategori" @bind="_category">
+        <option value="">Tüm kategoriler</option>
+        @foreach (var category in _incidents.Select(i => i.Category).Distinct().OrderBy(c => DashboardFormat.Category(c)))
+        {
+            <option value="@category">@DashboardFormat.Category(category)</option>
+        }
+    </select>
+    <select aria-label="Modül" @bind="_module">
+        <option value="">Tüm modüller</option>
+        @foreach (var module in Colors.Sort(_incidents.SelectMany(i => i.Applications)))
+        {
+            <option value="@module">@module</option>
+        }
+    </select>
+    @if (_loaded)
+    {
+        <span class="count">@Visible.Count olay</span>
+    }
+</div>
+
+<div class="card flush">
+    @if (!_loaded)
     {
         <div class="empty">Yükleniyor…</div>
     }
@@ -29,91 +52,51 @@
             <div class="muted">Demo için: <code>scripts/demo.sh start</code>, ardından <code>scripts/demo.sh deploy kayit 1.1.0 kayit-missing-column</code></div>
         </div>
     }
+    else if (Visible.Count == 0)
+    {
+        <div class="empty">Bu filtrelere uyan olay yok.</div>
+    }
     else
     {
-        <table class="list">
-            <thead>
-                <tr>
-                    <th>Durum</th>
-                    <th>Başladı</th>
-                    <th>Olay</th>
-                    <th class="hide-narrow">Kategori</th>
-                    <th class="hide-narrow">Modüller</th>
-                    <th class="num">Hata</th>
-                    <th class="hide-narrow">Geri bildirim</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var incident in _incidents)
-                {
-                    <tr class="clickable" @onclick="() => Open(incident.Id)">
-                        <td><span class="badge @incident.Status"><span class="dot"></span>@DashboardFormat.Status(incident.Status)</span></td>
-                        <td class="num">
-                            @Format.Time(incident.StartedAt)
-                            <div class="muted">@DashboardFormat.Duration(incident.LastSeen - incident.StartedAt)</div>
-                        </td>
-                        <td><a href="olaylar/@incident.Id" @onclick:stopPropagation>@incident.Title</a></td>
-                        <td class="hide-narrow">@DashboardFormat.Category(incident.Category)</td>
-                        <td class="hide-narrow">@string.Join(", ", incident.Applications)</td>
-                        <td class="num">@incident.Occurrences.ToString("N0")</td>
-                        <td class="hide-narrow"><Verdict Value="@incident.Verdict" /></td>
-                    </tr>
-                }
-            </tbody>
-        </table>
+        <IncidentTable Incidents="Visible" Sparks="_sparks" />
     }
 </div>
 
-<p class="muted">Son güncelleme @(_updated is { } u ? Format.Time(u) : "—") · @Format.Refresh.TotalSeconds sn'de bir yenilenir</p>
+<p class="foot-note">
+    Son güncelleme @(Updated is { } u ? Format.Time(u) : "—")
+    @if (RefreshError is not null)
+    {
+        <span class="warn"> · yenileme başarısız, eski veri gösteriliyor</span>
+    }
+</p>
 
 @code {
-    private static readonly (string? Value, string Label)[] Filters = [("open", "Açık"), ("closed", "Kapanan"), (null, "Tümü")];
+    private static readonly (string? Value, string Label)[] Statuses = [("open", "Açık"), ("closed", "Kapanan"), (null, "Tümü")];
 
-    private readonly CancellationTokenSource _stop = new();
-    private IReadOnlyList<IncidentSummary>? _incidents;
+    private IReadOnlyList<IncidentSummary> _incidents = [];
+    private IReadOnlyDictionary<Guid, int[]> _sparks = new Dictionary<Guid, int[]>();
+    private bool _loaded;
     private string? _status = "open";
-    private DateTimeOffset? _updated;
+    private string _search = "";
+    private string _category = "";
+    private string _module = "";
 
-    protected override async Task OnInitializedAsync()
+    private IReadOnlyList<IncidentSummary> Visible => _incidents
+        .Where(i => _search.Length == 0 || i.Title.Contains(_search.Trim(), StringComparison.CurrentCultureIgnoreCase))
+        .Where(i => _category.Length == 0 || i.Category.ToString() == _category)
+        .Where(i => _module.Length == 0 || i.Applications.Contains(_module))
+        .ToList();
+
+    protected override async Task LoadAsync()
     {
-        await LoadAsync();
-        _ = RefreshLoopAsync();
+        _incidents = await Store.ListIncidentsAsync(_status, 200, Stopping);
+        _sparks = await Store.IncidentSparksAsync(_incidents.Select(i => i.Id).ToList(), ct: Stopping);
+        _loaded = true;
     }
 
     private async Task SelectAsync(string? status)
     {
         _status = status;
-        await LoadAsync();
-    }
-
-    private async Task LoadAsync()
-    {
-        _incidents = await Store.ListIncidentsAsync(_status, ct: _stop.Token);
-        _updated = DateTimeOffset.UtcNow;
-    }
-
-    private async Task RefreshLoopAsync()
-    {
-        using var timer = new PeriodicTimer(Format.Refresh);
-        try
-        {
-            while (await timer.WaitForNextTickAsync(_stop.Token))
-            {
-                await LoadAsync();
-                await InvokeAsync(StateHasChanged);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Page closed
-        }
-    }
-
-    private void Open(Guid id) => Navigation.NavigateTo($"olaylar/{id}");
-
-    public void Dispose()
-    {
-        _stop.Cancel();
-        _stop.Dispose();
+        await ReloadAsync();
     }
 }

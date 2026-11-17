@@ -1,0 +1,38 @@
+@* One headline number. Status is carried by a dot next to the label, never by the number's color. *@
+@if (Href is null)
+{
+    <div class="stat">@Content</div>
+}
+else
+{
+    <a class="stat" href="@Href">@Content</a>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+    [Parameter, EditorRequired] public string Value { get; set; } = "";
+    [Parameter] public string? Hint { get; set; }
+    [Parameter] public string? Href { get; set; }
+
+    /// <summary>"critical", "good" or "warning"; null for no dot.</summary>
+    [Parameter] public string? Tone { get; set; }
+
+    /// <summary>The value is words, not a number.</summary>
+    [Parameter] public bool Text { get; set; }
+
+    private RenderFragment Content => __builder =>
+    {
+        <div class="label">
+            @if (Tone is not null)
+            {
+                <span class="dot @Tone"></span>
+            }
+            @Label
+        </div>
+        <div class="value @(Text ? "text" : "")">@Value</div>
+        @if (Hint is not null)
+        {
+            <div class="hint">@Hint</div>
+        }
+    };
+}
