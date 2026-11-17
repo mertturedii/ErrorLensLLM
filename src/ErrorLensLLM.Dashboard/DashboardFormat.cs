@@ -156,3 +156,14 @@ public sealed class ModuleColors(ErrorLensLLM.Storage.PostgreSql.PostgresDashboa
             .OrderBy(a => Array.IndexOf(order, a) is var i and >= 0 ? i : int.MaxValue).ThenBy(a => a).ToList();
     }
 }
+
+/// <summary>Clusters the error groups on screen by text similarity (see <see cref="ErrorLensLLM.Core.Grouping.ErrorGroupClusterer"/>).</summary>
+public static class ErrorGroupSimilarity
+{
+    private static readonly ErrorLensLLM.Core.Grouping.ErrorGroupClusterer Clusterer = new();
+
+    public static ErrorLensLLM.Core.Grouping.ErrorGroupClustering Cluster(IEnumerable<ErrorLensLLM.Storage.PostgreSql.ErrorGroupView> groups) =>
+        Clusterer.Cluster(groups
+            .Select(g => new ErrorLensLLM.Core.Grouping.ErrorGroupText(g.Fingerprint, g.ExceptionType, g.NormalizedMessage, g.TopFrame))
+            .ToList());
+}

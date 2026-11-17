@@ -1,13 +1,9 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using ErrorLensLLM.Experiments.Common;
 using ErrorLensLLM.Ml.Parsing;
 
 namespace ErrorLensLLM.Experiments.Hdfs;
-
-/// <summary>One HDFS block: all log events that mention its block id, in log order.</summary>
-public sealed record HdfsSession(string BlockId, bool IsAnomaly, bool HasWarning, int[] Events);
-
-public sealed record HdfsTemplate(int Id, long Count, string Text);
 
 /// <summary>
 /// Loads LogHub HDFS_v1 (Xu et al., SOSP 2009): parses HDFS.log with Drain, groups events by block id and
@@ -19,7 +15,7 @@ public static partial class HdfsDataset
     public const int MaxTemplates = 2000;
 
     /// <exception cref="ParsingDivergedException">Drain produced more than <see cref="MaxTemplates"/> templates.</exception>
-    public static (List<HdfsSession> Sessions, List<HdfsTemplate> Templates) Load(string directory, HdfsParserSettings? settings = null)
+    public static (List<LogSession> Sessions, List<LogTemplateRow> Templates) Load(string directory, HdfsParserSettings? settings = null)
     {
         settings ??= new HdfsParserSettings();
         var sessionsPath = Path.Combine(directory, $"sessions-{settings.CacheName}.tsv");
@@ -30,12 +26,12 @@ public static partial class HdfsDataset
 
         var templates = File.ReadLines(templatesPath)
             .Select(line => line.Split('\t'))
-            .Select(p => new HdfsTemplate(int.Parse(p[0]), long.Parse(p[1]), p[2]))
+            .Select(p => new LogTemplateRow(int.Parse(p[0]), long.Parse(p[1]), p[2]))
             .ToList();
 
         var sessions = File.ReadLines(sessionsPath)
             .Select(line => line.Split('\t'))
-            .Select(p => new HdfsSession(p[0], p[1] == "1", p[2] == "1", p[3].Split(',').Select(int.Parse).ToArray()))
+            .Select(p => new LogSession(p[0], p[1] == "1", p[2] == "1", p[3].Split(',').Select(int.Parse).ToArray()))
             .ToList();
 
         return (sessions, templates);

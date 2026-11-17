@@ -4,6 +4,10 @@
     <ProjectReference Include="..\ErrorLensLLM.Core\ErrorLensLLM.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Anthropic" Version="13.9.0" />
+  </ItemGroup>
+
   <PropertyGroup>
   </PropertyGroup>
 

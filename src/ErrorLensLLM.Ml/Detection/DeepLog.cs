@@ -74,19 +74,48 @@ public sealed class DeepLog : IDisposable
     public int[] WorstRanks(IReadOnlyList<int[]> sessions)
     {
         var results = new int[sessions.Count];
-        var windows = new List<(int Session, int[] Input, int Target)>();
+        var known = new List<int[]>();
+        var index = new List<int>();
 
         for (var s = 0; s < sessions.Count; s++)
         {
-            if (sessions[s].Any(e => e < 0 || e >= _eventCount))
+            if (sessions[s].Any(e => !IsKnown(e)))
             {
                 results[s] = int.MaxValue;
                 continue;
             }
 
-            var (inputs, targets) = BuildWindows([sessions[s]]);
-            for (var i = 0; i < targets.Count; i++)
-                windows.Add((s, inputs[i], targets[i]));
+            known.Add(sessions[s]);
+            index.Add(s);
+        }
+
+        var ranks = Ranks(known);
+        for (var i = 0; i < known.Count; i++)
+            results[index[i]] = ranks[i].DefaultIfEmpty(0).Max();
+
+        return results;
+    }
+
+    /// <summary>
+    /// Rank of every event among the model's predictions from the events before it (0 = most likely), for scoring a
+    /// stream event by event. An unseen event id gets <see cref="int.MaxValue"/>; as context for later events it is
+    /// treated like the start of the sequence, so one unknown event does not condemn the ones after it.
+    /// </summary>
+    public int[][] Ranks(IReadOnlyList<int[]> sequences)
+    {
+        var results = sequences.Select(s => new int[s.Length]).ToArray();
+        var windows = new List<(int Sequence, int Position, int[] Input, int Target)>();
+
+        for (var s = 0; s < sequences.Count; s++)
+        {
+            var (inputs, targets) = BuildWindows([sequences[s]]);
+            for (var t = 0; t < targets.Count; t++)
+            {
+                if (IsKnown(sequences[s][t]))
+                    windows.Add((s, t, inputs[t], targets[t]));
+                else
+                    results[s][t] = int.MaxValue;
+            }
         }
 
         _model.eval();
@@ -101,11 +130,13 @@ public sealed class DeepLog : IDisposable
             var ranks = logits.gt(targetLogits).sum(1).data<long>().ToArray();
 
             for (var i = 0; i < batch.Count; i++)
-                results[batch[i].Session] = Math.Max(results[batch[i].Session], (int)ranks[i]);
+                results[batch[i].Sequence][batch[i].Position] = (int)ranks[i];
         }
 
         return results;
     }
+
+    private bool IsKnown(int eventId) => eventId >= 0 && eventId < _eventCount;
 
     public void Dispose() => _model.Dispose();
 
@@ -124,7 +155,7 @@ public sealed class DeepLog : IDisposable
                 for (var k = 0; k < size; k++)
                 {
                     var source = t - size + k;
-                    window[k] = source < 0 ? Padding : session[source] + 1;
+                    window[k] = source < 0 || !IsKnown(session[source]) ? Padding : session[source] + 1;
                 }
 
                 inputs.Add(window);

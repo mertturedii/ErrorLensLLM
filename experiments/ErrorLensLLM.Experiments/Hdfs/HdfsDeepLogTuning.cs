@@ -1,3 +1,4 @@
+using ErrorLensLLM.Experiments.Common;
 using System.Diagnostics;
 using System.Text;
 using ErrorLensLLM.Ml.Evaluation;
@@ -50,7 +51,7 @@ public static class HdfsDeepLogTuning
             Console.WriteLine($"Training DeepLog on {size:N0} normal blocks...");
             var watch = Stopwatch.StartNew();
             var trainingSet = normal.Take(size).ToList();
-            using var model = new HdfsDeepLog(trainingSet, options.Epochs, Console.WriteLine);
+            using var model = new SessionDeepLog(trainingSet, options.Epochs, Console.WriteLine);
             var templates = trainingSet.SelectMany(e => e).Distinct().Count();
             runs.Add(new TrainedModel(size, templates, watch.Elapsed, model.WorstRanks(validation), model.WorstRanks(test)));
         }

@@ -1,6 +1,10 @@
 using System.Security.Cryptography;
 using System.Text;
 using ErrorLensLLM.Collector;
+using Anthropic;
+using ErrorLensLLM.AI.Claude;
+using ErrorLensLLM.Collector.Anomalies;
+using ErrorLensLLM.Collector.Explanations;
 using ErrorLensLLM.Collector.Incidents;
 using ErrorLensLLM.Collector.Ingestion;
 using ErrorLensLLM.Core.Incidents;
@@ -30,10 +34,31 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IncidentAnalyzer>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IncidentAnalyzer>());
 
+builder.Services.Configure<AnomalyOptions>(builder.Configuration.GetSection(AnomalyOptions.Section));
+builder.Services.AddSingleton<PostgresAnomalyStore>();
+builder.Services.AddSingleton<AnomalyMonitor>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AnomalyMonitor>());
+
+// LLM explanation layer: on only when an API key is configured (Claude:ApiKey or ANTHROPIC_API_KEY)
+var claude = builder.Configuration.GetSection(ClaudeOptions.Section).Get<ClaudeOptions>() ?? new ClaudeOptions();
+claude.ApiKey ??= Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
+builder.Services.AddSingleton<PostgresExplanationStore>();
+builder.Services.AddSingleton<PostgresDashboardStore>();
+if (!string.IsNullOrWhiteSpace(claude.ApiKey))
+{
+    builder.Services.AddSingleton(new IncidentExplainer(new AnthropicClient { ApiKey = claude.ApiKey }, claude));
+    builder.Services.AddHostedService<ExplanationService>();
+}
+
 var app = builder.Build();
 
 await app.Services.GetRequiredService<PostgresLogStore>().EnsureSchemaAsync();
 await app.Services.GetRequiredService<PostgresIncidentStore>().EnsureSchemaAsync();
+await app.Services.GetRequiredService<PostgresAnomalyStore>().EnsureSchemaAsync();
+await app.Services.GetRequiredService<PostgresExplanationStore>().EnsureSchemaAsync();
+app.Logger.LogInformation(string.IsNullOrWhiteSpace(claude.ApiKey)
+    ? "LLM explanations are off: set ANTHROPIC_API_KEY (or Claude:ApiKey) to turn them on"
+    : "LLM explanations are on with {Model}", claude.Model);
 
 app.MapGet("/health", async (NpgsqlDataSource db, CancellationToken ct) =>
 {

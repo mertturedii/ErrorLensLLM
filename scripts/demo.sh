@@ -19,7 +19,7 @@ mkdir -p "$state/logs" "$state/pids"
 
 # macOS ships bash 3.2, which has no associative arrays
 port() {
-  case $1 in collector) echo 5025 ;; dashboard) echo 5200 ;; kayit) echo 5101 ;; not) echo 5102 ;; odeme) echo 5103 ;; traffic) echo 5100 ;; esac
+  case $1 in collector) echo 5025 ;; dashboard) echo 5200 ;; kayit) echo 5101 ;; not) echo 5102 ;; odeme) echo 5103 ;; traffic) echo 5104 ;; esac
 }
 
 build() {

@@ -1,4 +1,5 @@
 ﻿using System.Globalization;
+using ErrorLensLLM.Experiments.Bgl;
 using ErrorLensLLM.Experiments.Faults;
 using ErrorLensLLM.Experiments.Hdfs;
 using ErrorLensLLM.Ml.Parsing;
@@ -11,6 +12,8 @@ using ErrorLensLLM.Ml.Parsing;
 //   hdfs-parse [--data data/HDFS] [--report docs/experiments/hdfs-parsing.md] [--similarities 0.5,0.6,0.7,0.8,0.9]
 //              [--modes original,constanttokens] [--mask-paths false,true]
 //              [--skip-detection]
+//   bgl        [--data data/BGL] [--report docs/experiments/bgl-results.md] [--window 20] [--train-ratio 0.8] [--epochs 10]
+//              [--deeplog-sessions 20000] [--shuffle]   (--shuffle: random split, report bgl-results-random.md)
 //   faults     [--report docs/experiments/fault-injection.md] [--repetitions 3] [--baseline 20] [--fault 40]
 //              [--scenarios kayit-missing-column,odeme-bank-outage,...]
 //              needs PostgreSQL (deploy/docker-compose.yml); uses its own database errorlens_eval and ports 5025-5200
@@ -82,6 +85,26 @@ switch (args.FirstOrDefault())
         });
         return 0;
     }
+    case "bgl":
+    {
+        var shuffle = args.Contains("--shuffle");
+        var defaults = new BglExperimentOptions
+        {
+            DataDirectory = "data/BGL",
+            ReportPath = shuffle ? "docs/experiments/bgl-results-random.md" : "docs/experiments/bgl-results.md",
+            Shuffle = shuffle
+        };
+        BglExperiment.Run(defaults with
+        {
+            DataDirectory = Option("--data") ?? defaults.DataDirectory,
+            ReportPath = Option("--report") ?? defaults.ReportPath,
+            WindowSize = IntOption("--window") ?? defaults.WindowSize,
+            TrainRatio = DoubleOption("--train-ratio") ?? defaults.TrainRatio,
+            DeepLogEpochs = IntOption("--epochs") ?? defaults.DeepLogEpochs,
+            DeepLogSessions = IntOption("--deeplog-sessions") ?? defaults.DeepLogSessions
+        });
+        return 0;
+    }
     case "faults":
     {
         var defaults = new FaultInjectionOptions { RepositoryRoot = Directory.GetCurrentDirectory(), ReportPath = "docs/experiments/fault-injection.md" };
@@ -97,6 +120,6 @@ switch (args.FirstOrDefault())
         return 0;
     }
     default:
-        Console.Error.WriteLine("Usage: ErrorLensLLM.Experiments <hdfs|hdfs-tune|hdfs-parse|faults> [options]  (see Program.cs)");
+        Console.Error.WriteLine("Usage: ErrorLensLLM.Experiments <hdfs|hdfs-tune|hdfs-parse|bgl|faults> [options]  (see Program.cs)");
         return 1;
 }

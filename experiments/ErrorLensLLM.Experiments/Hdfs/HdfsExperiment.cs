@@ -1,3 +1,4 @@
+using ErrorLensLLM.Experiments.Common;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
@@ -84,58 +85,22 @@ public static class HdfsExperiment
         Console.WriteLine(report);
     }
 
-    private static List<bool> RareTemplateRule(List<HdfsSession> train, List<HdfsSession> test, int templateCount, double share)
-    {
-        var blocksWithTemplate = new int[templateCount];
-        foreach (var session in train)
-        {
-            foreach (var id in session.Events.Distinct())
-                blocksWithTemplate[id]++;
-        }
+    private static List<bool> RareTemplateRule(List<LogSession> train, List<LogSession> test, int templateCount, double share) =>
+        SessionDetectors.RareTemplate(train, test, templateCount, share);
 
-        var minimum = share * train.Count;
-        return test.Select(s => s.Events.Any(id => blocksWithTemplate[id] < minimum)).ToList();
-    }
+    internal static List<bool> IsolationForestDetector(List<LogSession> train, List<LogSession> test, int templateCount, double contamination) =>
+        SessionDetectors.IsolationForest(train, test, templateCount, contamination);
 
-    internal static List<bool> IsolationForestDetector(List<HdfsSession> train, List<HdfsSession> test, int templateCount, double contamination)
-    {
-        var forest = new IsolationForest(treeCount: 100, sampleSize: 256, seed: 42);
-        forest.Fit(train.Select(s => CountVector(s, templateCount)).ToList());
-
-        // Many blocks share the same event counts; score each distinct vector once
-        var cache = new Dictionary<string, double>();
-        double Score(HdfsSession s)
-        {
-            var vector = CountVector(s, templateCount);
-            var key = string.Join(',', vector);
-            if (!cache.TryGetValue(key, out var score))
-                cache[key] = score = forest.Score(vector);
-            return score;
-        }
-
-        var trainScores = train.Select(Score).OrderBy(x => x).ToArray();
-        var threshold = trainScores[(int)((trainScores.Length - 1) * (1 - contamination))];
-        return test.Select(s => Score(s) > threshold).ToList();
-    }
-
-    internal static List<bool> DeepLogDetector(List<HdfsSession> train, List<HdfsSession> test, int templateCount, HdfsExperimentOptions options)
+    internal static List<bool> DeepLogDetector(List<LogSession> train, List<LogSession> test, int templateCount, HdfsExperimentOptions options)
     {
         var normal = train.Where(s => !s.IsAnomaly).Take(options.DeepLogSessions).Select(s => s.Events).ToList();
 
-        using var model = new HdfsDeepLog(normal, options.DeepLogEpochs, Console.WriteLine);
+        using var model = new SessionDeepLog(normal, options.DeepLogEpochs, Console.WriteLine);
         return model.WorstRanks(test).Select(rank => rank >= options.DeepLogTopG).ToList();
     }
 
-    private static double[] CountVector(HdfsSession session, int templateCount)
-    {
-        var vector = new double[templateCount];
-        foreach (var id in session.Events)
-            vector[id]++;
-        return vector;
-    }
-
     private static string BuildReport(
-        HdfsExperimentOptions options, int sessionCount, int templateCount, List<HdfsSession> train, List<HdfsSession> test,
+        HdfsExperimentOptions options, int sessionCount, int templateCount, List<LogSession> train, List<LogSession> test,
         List<(string Method, string Setting, DetectionMetrics Metrics, TimeSpan Elapsed)> results)
     {
         var inv = CultureInfo.InvariantCulture;

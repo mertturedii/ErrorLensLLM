@@ -1,3 +1,4 @@
+using ErrorLensLLM.Experiments.Common;
 using System.Text;
 using ErrorLensLLM.Ml.Evaluation;
 using ErrorLensLLM.Ml.Parsing;
@@ -42,8 +43,8 @@ public static class HdfsParsingExperiment
         {
             Console.WriteLine($"{parser}...");
             var columns = $"| {parser.Mode} | {(parser.MaskPaths ? "yes" : "no")} | {parser.Similarity} |";
-            List<HdfsSession> sessions;
-            List<HdfsTemplate> templates;
+            List<LogSession> sessions;
+            List<LogTemplateRow> templates;
             try
             {
                 (sessions, templates) = HdfsDataset.Load(options.DataDirectory, parser);
@@ -58,7 +59,7 @@ public static class HdfsParsingExperiment
             var text = templates.ToDictionary(t => t.Id, t => t.Text);
 
             // Block traces list the same messages in the same order, so events align position by position
-            var result = ParsingMetrics.GroupingAccuracy(sessions.SelectMany(s => s.Events.Zip(truth[s.BlockId])));
+            var result = ParsingMetrics.GroupingAccuracy(sessions.SelectMany(s => s.Events.Zip(truth[s.Id])));
 
             var f1 = "";
             if (!options.SkipDetection)

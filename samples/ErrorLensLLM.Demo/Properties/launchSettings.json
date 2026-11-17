@@ -22,7 +22,7 @@
     "traffic": {
       "commandName": "Project",
       "commandLineArgs": "--Demo:Module=traffic",
-      "applicationUrl": "http://localhost:5100",
+      "applicationUrl": "http://localhost:5104",
       "environmentVariables": { "ASPNETCORE_ENVIRONMENT": "Development" }
     }
   }

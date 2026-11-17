@@ -27,4 +27,20 @@ public class DeepLogTests
 
         Assert.Equal(int.MaxValue, model.WorstRanks([[0, 5]])[0]);
     }
+
+    [Fact]
+    public void Ranks_flag_only_the_unknown_event_of_a_stream()
+    {
+        var normal = Enumerable.Repeat(new[] { 0, 1, 2, 3 }, 200).ToList();
+        using var model = new DeepLog(eventCount: 4, new DeepLogOptions { WindowSize = 3, Epochs = 30, BatchSize = 64, LearningRate = 0.01 });
+        model.Fit(normal);
+
+        var ranks = model.Ranks([[0, 1, 9, 2, 3]])[0];
+
+        Assert.Equal(int.MaxValue, ranks[2]);
+        Assert.Equal(0, ranks[0]);
+        Assert.Equal(0, ranks[1]);
+        // The unknown event is context for the next ones but does not make them anomalous by itself
+        Assert.All(ranks.Where((_, i) => i != 2), r => Assert.NotEqual(int.MaxValue, r));
+    }
 }

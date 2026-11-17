@@ -7,6 +7,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Native libtorch for the live DeepLog model; ErrorLensLLM.Ml carries the managed bindings only -->
+    <PackageReference Include="TorchSharp-cpu" Version="0.107.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ErrorLensLLM.AI.Claude\ErrorLensLLM.AI.Claude.csproj" />
     <ProjectReference Include="..\ErrorLensLLM.Core\ErrorLensLLM.Core.csproj" />
     <ProjectReference Include="..\ErrorLensLLM.Ml\ErrorLensLLM.Ml.csproj" />
     <ProjectReference Include="..\ErrorLensLLM.Storage.PostgreSql\ErrorLensLLM.Storage.PostgreSql.csproj" />

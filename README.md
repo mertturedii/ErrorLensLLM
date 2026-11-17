@@ -3,7 +3,8 @@
 Machine learning based log anomaly detection and incident management for .NET applications.
 
 > Term project — *Makine Öğrenmesi Tabanlı Uygulama Log Anomali Tespiti ve Akıllı Olay Yönetim Platformunun Geliştirilmesi*
-> Status: early development. The anomaly detection experiments run; the collection pipeline and dashboard are not built yet.
+> Status: all parts run end to end on a three-service demo: collection, live anomaly scores, incident correlation with
+> root cause ranking, error clustering, LLM explanations and a dashboard with developer feedback. Experiments on HDFS and BGL.
 
 ## Problem
 
@@ -63,6 +64,23 @@ the share of constant tokens, so at ≥ 0.6 it diverges into thousands of templa
 It separates `PacketResponder … terminating` from `… interrupted`, which the default setting merges. Detection F1 does not change,
 because the merged event occurs only 49 times. A higher parsing accuracy alone does not improve detection.
 
+## Current results — BGL
+
+LogHub BGL: 4.7M lines, cut into windows of 20 consecutive lines (BGL has no session id). 80/20 split; top-g and the
+Isolation Forest threshold are tuned on a validation part of the training windows. Full discussion: [docs/experiments/bgl.md](docs/experiments/bgl.md).
+
+| Method | F1, chronological split | F1, random split |
+|---|---|---|
+| Rule: window has a FATAL / FAILURE line | **0.733** | 0.616 |
+| Rule: rare template | 0.201 | 0.132 |
+| Isolation Forest (tuned contamination) | 0.044 | 0.389 |
+| DeepLog (tuned top-g) | 0.131 | **0.963** |
+
+The split decides the ranking. In log order, 47.6 % of the test windows contain one of 100 templates that never occur
+in the training part, most of them ordinary INFO lines, and DeepLog flags them all. With shuffled windows almost none
+are unseen and DeepLog reaches 0.963. The level rule is strong because BGL's labels are themselves FATAL alert lines.
+Parsing BGL needed the constant-token Drain similarity: with the original one, register dumps made Drain diverge.
+
 ### Reproduce
 
 ```bash
@@ -73,6 +91,10 @@ unzip HDFS_v1.zip && cd ../..
 dotnet run --project experiments/ErrorLensLLM.Experiments -c Release -- hdfs         # method comparison
 dotnet run --project experiments/ErrorLensLLM.Experiments -c Release -- hdfs-tune    # DeepLog top-g / training size
 dotnet run --project experiments/ErrorLensLLM.Experiments -c Release -- hdfs-parse   # Drain parsing accuracy
+
+mkdir -p data/BGL && curl -L -o data/BGL/BGL.zip 'https://zenodo.org/records/8196385/files/BGL.zip?download=1' && unzip data/BGL/BGL.zip -d data/BGL
+dotnet run --project experiments/ErrorLensLLM.Experiments -c Release -- bgl            # chronological split
+dotnet run --project experiments/ErrorLensLLM.Experiments -c Release -- bgl --shuffle  # random split
 ```
 
 The first run of each parser setting parses the log with Drain (about 10 s) and caches the sessions in `data/HDFS`.
@@ -148,6 +170,49 @@ For the faulty release above, all five error groups form one incident, titled
 0.88; its evidence is "first error in the chain in 909 of 909 shared traces" and "started 0 s after the kayit 1.1.0
 deployment". The HTTP errors in `not` and `odeme` score 0–0.08 and are classified as dependency failures.
 
+## Live anomaly detection
+
+The collector also scores the live stream ([AnomalyMonitor](src/ErrorLensLLM.Collector/Anomalies/AnomalyMonitor.cs),
+[StreamAnomalyModel](src/ErrorLensLLM.Ml/Streaming/StreamAnomalyModel.cs)). A demo request writes one or two log lines,
+so a trace is too short to be a DeepLog session; as on BGL, each module's stream is cut into **10-second buckets**:
+
+- **DeepLog** predicts each template from the ten before it in the module's stream; a bucket's score is the share of its
+  events outside the top-g predictions. Templates never seen in training are always outside.
+- **Isolation Forest** scores the bucket's template count vector: an unusual mix of ordinary lines.
+- **A volume rule** flags an event count more than 4σ (and at least 50 %) from the training mean. Isolation Forest cannot
+  see this: its splits lie inside the training range, so a silent module scores like the quietest training bucket.
+
+A model per module trains on the error-free buckets of the last 10 minutes (at least 18 buckets and 200 events). Top-g is
+the smallest g that flags at most 1 % of the events in a held-out quarter of those buckets; the DeepLog threshold is the
+highest share seen there (at least 5 %); the forest threshold is the highest training score. Models retrain every
+30 minutes so that a healthy release's new lines become normal.
+
+Measured on the demo ([docs/experiments/live-anomaly.md](docs/experiments/live-anomaly.md)): no alarm in 230 healthy
+buckets; a restart of the demo flagged by DeepLog in all three modules (correctly unusual, but no incident); the faulty
+kayit release flagged by DeepLog in all three modules from the first bucket after the release (27 of 27 buckets). The
+score arrived about 10 s after the incident opened, so for this fault it is a second, independent signal, not an earlier
+one. Isolation Forest flagged none of the faulty buckets.
+
+## Grouping similar errors
+
+A fingerprint separates errors that differ in type, message template or code location, so one failure often appears as
+several error groups: the same HTTP 500 seen by `not` and by `odeme`. [ErrorGroupClusterer](src/ErrorLensLLM.Core/Grouping/ErrorGroupClusterer.cs)
+turns each group into a TF-IDF vector of its exception type, message and frame terms (a sparse embedding computed in
+process; no text leaves the machine) and joins groups by average-linkage clustering at cosine similarity ≥ 0.5. The error
+group list marks clustered groups and the group page lists its most similar groups. There is no labeled data for error
+similarity, so this part is shown, not measured.
+
+## LLM explanation layer
+
+When the collector has an Anthropic API key (`ANTHROPIC_API_KEY` or `Claude:ApiKey`), it asks Claude
+([IncidentExplainer](src/ErrorLensLLM.AI.Claude/IncidentExplainer.cs), default model `claude-opus-5-5`, effort medium) to
+explain every new incident 30 s after it opens, and again when its root cause changes. The model receives the ranked
+candidates with their evidence, the suspected release, one request chain, the root cause's stack trace and the live
+anomaly notes. All of these texts were masked by the collector. It answers in Turkish, in a fixed JSON schema: summary,
+root cause, impact, next steps, confidence, and a separate field for disagreeing with the ranking. The rule-based ranking stays
+the decision and the feedback form still judges it; the explanation helps a developer read it. A refusal is retried by a
+fallback model on the server (`fallbacks: "default"`). Without a key the layer is off and the dashboard says so.
+
 ## Evaluation with fault injection
 
 `dotnet run --project experiments/ErrorLensLLM.Experiments -c Release -- faults` runs each scenario three times against a
@@ -201,17 +266,20 @@ every 2 s.
 - **Incidents (`/olaylar`):** open, closed or all; search, category and module filters; a sparkline of each incident.
 - **Incident detail:**
   - the root cause with its evidence, and how far ahead of the second candidate it scored;
+  - the LLM explanation (summary, cause, impact, next steps, confidence, disagreement), when the layer is on;
   - a timeline of errors per module with deployment markers, and a table view;
   - every root cause candidate with its score;
   - one request chain showing how the failure spread across modules, and the latest errors;
   - the suspected deployment (version, commit) and the feedback form, kept in view beside the rest.
 - **Error groups (`/hatalar`):** every fingerprint with its count, modules, category and the incident it belongs to;
-  the group page adds its timeline, a sample stack trace and the latest occurrences.
+  similar groups are clustered; the group page adds its timeline, the most similar groups, a sample stack trace and the
+  latest occurrences.
 - **Deployments (`/deploylar`):** the history per module, which ones changed the version (only those can be
   suspected), errors logged under each, and the incident a deployment is suspected of.
-- **Log monitoring (`/izleme`):** all logs, not only errors: volume by level, error rate per module, the log templates
-  seen in the window (new ones flagged) and a searchable tail. These are counts; the DeepLog and Isolation Forest
-  scores are computed in the offline experiments only and are not wired to the live stream.
+- **Log monitoring (`/izleme`):** the live anomaly score of each module over time against its threshold, each module's
+  model (training period, top-g, thresholds), the latest flagged buckets with the detectors that fired and the unseen
+  templates; then all logs, not only errors: volume by level, error rate per module, the log templates seen in the
+  window and a searchable tail.
 - **Evaluation (`/degerlendirme`):** Top-1 and Top-3 accuracy of the suggested root cause from developer verdicts.
 - **Feedback:** developers mark the suggested root cause correct or wrong, and can pick the real one.
   Verdicts are stored with the suggestion they judged (`incident_feedback`), which makes them evaluation data for the
@@ -224,15 +292,15 @@ menu into a top strip on narrow screens.
 
 | Path | Contents | Status |
 |---|---|---|
-| `src/ErrorLensLLM.Ml` | Drain parser, Isolation Forest, DeepLog, detection metrics | ✅ |
-| `src/ErrorLensLLM.Core` | Exception capture model, PII masking, message normalization, fingerprinting, background queue | ✅ first version |
-| `experiments/ErrorLensLLM.Experiments` | Reproducible experiments on public datasets | ✅ HDFS |
+| `src/ErrorLensLLM.Ml` | Drain parser, Isolation Forest, DeepLog, detection metrics, live stream model | ✅ |
+| `src/ErrorLensLLM.Core` | PII masking, message normalization, fingerprinting, incident correlation, error clustering | ✅ |
+| `experiments/ErrorLensLLM.Experiments` | Reproducible experiments: HDFS, BGL, fault injection | ✅ |
 | `tests/` | Unit tests for Core and Ml | ✅ |
 | `src/ErrorLensLLM.Serilog` | Serilog sink that sends logs to the collector | ✅ |
-| `src/ErrorLensLLM.Collector` | Ingestion API: masking, templating, fingerprinting | ✅ |
+| `src/ErrorLensLLM.Collector` | Ingestion API (masking, templating, fingerprinting), incident analyzer, anomaly monitor, explanations | ✅ |
 | `src/ErrorLensLLM.Dashboard` | Blazor Server dashboard: overview, incidents, error groups, deployments, log monitoring, evaluation | ✅ |
-| `src/ErrorLensLLM.Storage.PostgreSql` | Central log and incident store | ✅ logs, ⏳ incidents |
-| `src/ErrorLensLLM.AI.Claude` | LLM explanation of incidents | planned |
+| `src/ErrorLensLLM.Storage.PostgreSql` | Logs, incidents, feedback, anomaly scores, explanations | ✅ |
+| `src/ErrorLensLLM.AI.Claude` | LLM explanation of incidents | ✅ (needs an API key) |
 | `src/ErrorLensLLM.Source.Bitbucket` | Fetches source code at the deployed commit for root cause context | planned |
 | `samples/ErrorLensLLM.Demo` | Demo modules with controlled fault injection | ✅ |
 
@@ -240,13 +308,16 @@ menu into a top strip on narrow screens.
 
 - [x] Drain, rule baselines, Isolation Forest, DeepLog on HDFS
 - [x] DeepLog tuning (top-g sweep, training size) and Drain parsing accuracy against the ground-truth templates
-- [ ] Embedding + clustering for grouping similar errors
-- [ ] BGL dataset
+- [x] TF-IDF embedding + clustering for grouping similar errors
+- [x] BGL dataset (chronological and random split)
+- [x] Live anomaly scores (DeepLog, Isolation Forest, volume rule) on the collected stream
 - [x] Collection pipeline: Serilog sink (W3C trace ids) → collector → PostgreSQL, demo modules with fault injection
 - [x] Incident correlation (trace chain, deployment, onset) and root cause ranking
 - [x] Dashboard with developer feedback
-- [ ] LLM explanation layer
-- [ ] Evaluation with fault injection scenarios (top-k root cause accuracy)
+- [x] LLM explanation layer
+- [x] Evaluation with fault injection scenarios (top-k root cause accuracy)
+- [ ] LogBERT (future work)
+- [ ] Source code at the deployed commit as context for the LLM (`ErrorLensLLM.Source.Bitbucket`)
 
 ## Privacy
 
@@ -261,3 +332,4 @@ public LogHub datasets only.
 - M. Du et al., *DeepLog: Anomaly Detection and Diagnosis from System Logs through Deep Learning*, CCS 2017
 - J. Zhu et al., *Loghub: A Large Collection of System Log Datasets for AI-driven Log Analytics*, ISSRE 2023
 - W. Xu et al., *Detecting Large-Scale System Problems by Mining Console Logs*, SOSP 2009 (HDFS dataset)
+- A. Oliner, J. Stearley, *What Supercomputers Say: A Study of Five System Logs*, DSN 2007 (BGL dataset)

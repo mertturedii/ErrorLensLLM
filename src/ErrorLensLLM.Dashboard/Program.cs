@@ -15,6 +15,8 @@ builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(
     builder.Configuration.GetConnectionString("ErrorLens") ?? throw new InvalidOperationException("ConnectionStrings:ErrorLens is missing.")));
 builder.Services.AddSingleton<PostgresLogStore>();
 builder.Services.AddSingleton<PostgresIncidentStore>();
+builder.Services.AddSingleton<PostgresAnomalyStore>();
+builder.Services.AddSingleton<PostgresExplanationStore>();
 builder.Services.AddSingleton<PostgresDashboardStore>();
 builder.Services.AddSingleton<DashboardFormat>();
 builder.Services.AddSingleton<ModuleColors>();
@@ -25,6 +27,8 @@ var app = builder.Build();
 // The dashboard can start before the collector has ever run
 await app.Services.GetRequiredService<PostgresLogStore>().EnsureSchemaAsync();
 await app.Services.GetRequiredService<PostgresIncidentStore>().EnsureSchemaAsync();
+await app.Services.GetRequiredService<PostgresAnomalyStore>().EnsureSchemaAsync();
+await app.Services.GetRequiredService<PostgresExplanationStore>().EnsureSchemaAsync();
 
 if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Error", createScopeForErrors: true);

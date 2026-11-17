@@ -1,6 +1,7 @@
 @page "/olaylar/{Id:guid}"
 @inherits RefreshingPage
 @inject PostgresDashboardStore Store
+@inject PostgresExplanationStore Explanations
 
 <PageTitle>@(_incident?.Summary.Title ?? "Olay") · ErrorLensLLM</PageTitle>
 
@@ -59,10 +60,61 @@ else if (_incident is { } incident)
                         <li>@line</li>
                     }
                 </ul>
-                <div class="callout secondary small">
-                    <strong>LLM açıklaması</strong> henüz yapılandırılmadı. Yapılandırıldığında burada, yukarıdaki kanıtlara ve ilgili koda dayanan
-                    bir neden ve çözüm açıklaması görünecek.
+            </section>
+
+            <section class="card">
+                <div class="card-head">
+                    <h2>Yapay zekâ açıklaması</h2>
+                    @if (_explanation is { Json: not null } done)
+                    {
+                        <span class="muted small">@done.Model · @Format.Stamp(done.CreatedAt) · @DashboardFormat.Number(done.InputTokens + done.OutputTokens) token</span>
+                    }
                 </div>
+                @if (_explanation is null)
+                {
+                    <div class="callout secondary small">
+                        Bu olay için açıklama yok. LLM katmanı collector'da <code>ANTHROPIC_API_KEY</code> tanımlıyken açılır ve her yeni olayı,
+                        ilk dalgası oturduktan (30 sn) sonra bir kez açıklar; kök neden değişirse yeniden açıklar.
+                    </div>
+                }
+                else if (_explanation.Json is null)
+                {
+                    <div class="callout secondary small">Açıklama üretilemedi: @_explanation.Error (10 dk sonra yeniden denenecek)</div>
+                }
+                else if (_explained is { } x)
+                {
+                    @if (_explanation.RootFingerprint != _incident!.RootFingerprint)
+                    {
+                        <div class="callout secondary small">Bu açıklama önceki kök neden adayı için yazıldı; yenisi hazırlanıyor.</div>
+                    }
+                    <p>@x.Summary</p>
+                    <dl class="explain">
+                        <dt>Kök neden</dt>
+                        <dd>@x.RootCause</dd>
+                        <dt>Etki</dt>
+                        <dd>@x.Impact</dd>
+                        <dt>Sonraki adımlar</dt>
+                        <dd>
+                            <ol>
+                                @foreach (var step in x.NextSteps)
+                                {
+                                    <li>@step</li>
+                                }
+                            </ol>
+                        </dd>
+                        <dt>Güven</dt>
+                        <dd>@x.Confidence</dd>
+                        @if (!string.IsNullOrWhiteSpace(x.Disagreement))
+                        {
+                            <dt>Sıralamaya itiraz</dt>
+                            <dd class="warn">@x.Disagreement</dd>
+                        }
+                    </dl>
+                    <div class="muted small">
+                        Model, sistemin sıraladığı adayları ve kanıtları açıklar; öneri kararı kural tabanlı sıralamadır. Modele giden tüm metinler
+                        collector'da maskelendi.
+                    </div>
+                }
             </section>
 
             <section class="card">
@@ -285,6 +337,10 @@ else
     private IReadOnlyList<LogEventView> _trace = [];
     private IReadOnlyList<LogEventView> _recent = [];
     private FeedbackView? _feedback;
+    private ExplanationRow? _explanation;
+    private Explained? _explained;
+
+    private sealed record Explained(string Summary, string RootCause, string Impact, List<string> NextSteps, string Confidence, string? Disagreement);
 
     private string _tab = "trace";
     private string? _verdict;
@@ -307,6 +363,10 @@ else
         _trace = await Store.SampleTraceAsync(Id, _incident.RootFingerprint, Stopping);
         _recent = await Store.RecentErrorsAsync(Id, ct: Stopping);
         _feedback = await Store.LatestFeedbackAsync(Id, Stopping);
+        _explanation = await Explanations.LatestAsync(Id, Stopping);
+        _explained = _explanation?.Json is { } json
+            ? System.Text.Json.JsonSerializer.Deserialize<Explained>(json, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))
+            : null;
     }
 
     private async Task SaveFeedbackAsync()

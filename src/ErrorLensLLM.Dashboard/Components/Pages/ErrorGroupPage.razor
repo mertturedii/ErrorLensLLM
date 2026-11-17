@@ -59,6 +59,60 @@ else if (_group is { } group)
         }
     </section>
 
+    <section class="card flush">
+        <h2>Benzer hata grupları</h2>
+        @if (_similar.Count == 0)
+        {
+            <div class="empty">Metni bu gruba benzeyen başka hata grubu yok.</div>
+        }
+        else
+        {
+            <div class="scroll-x">
+                <table class="list">
+                    <thead>
+                        <tr>
+                            <th>Hata</th>
+                            <th>Modüller</th>
+                            <th style="width:160px">Benzerlik</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var (other, similarity) in _similar)
+                        {
+                            <tr @key="other.Fingerprint">
+                                <td>
+                                    <a class="title" href="hatalar/@other.Fingerprint">@DashboardFormat.ShortType(other.ExceptionType)</a>
+                                    <div class="mono secondary">@other.NormalizedMessage</div>
+                                    @if (other.TopFrame is not null)
+                                    {
+                                        <div class="muted small"><code>@other.TopFrame</code></div>
+                                    }
+                                </td>
+                                <td>
+                                    <div class="chips">
+                                        @foreach (var app in Colors.Sort(other.Applications))
+                                        {
+                                            <ModuleChip Name="@app" />
+                                        }
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="meter">
+                                        <div class="track"><span style="width:@((int)(similarity * 100))%"></span></div>
+                                        <span class="num">@similarity.ToString("0.00")</span>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <div class="muted small" style="padding:10px 18px 14px">
+                Tür, mesaj ve kod konumu terimlerinin TF-IDF vektörleri arasındaki kosinüs benzerliği; 0,5 ve üstü aynı kümeye girer.
+            </div>
+        }
+    </section>
+
     <section class="card">
         <h2>Örnek stack trace</h2>
         @if (_stack is null)
@@ -113,6 +167,7 @@ else
     private IReadOnlyList<IncidentSummary> _incidents = [];
     private IReadOnlyList<LogEventView> _events = [];
     private string? _stack;
+    private IReadOnlyList<(ErrorGroupView Group, double Similarity)> _similar = [];
 
     protected override async Task LoadAsync()
     {
@@ -125,5 +180,12 @@ else
         _incidents = await Store.IncidentsOfGroupAsync(Fingerprint, Stopping);
         _events = await Store.GroupEventsAsync(Fingerprint, 10, Stopping);
         _stack = await Store.SampleStackTraceAsync(Fingerprint, Stopping);
+
+        var all = await Store.ListErrorGroupsAsync(ct: Stopping);
+        var byFingerprint = all.ToDictionary(g => g.Fingerprint);
+        _similar = ErrorGroupSimilarity.Cluster(all).Similar(Fingerprint)
+            .Where(s => byFingerprint.ContainsKey(s.Fingerprint))
+            .Select(s => (byFingerprint[s.Fingerprint], s.Similarity))
+            .ToList();
     }
 }
