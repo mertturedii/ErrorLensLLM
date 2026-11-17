@@ -100,11 +100,16 @@ public sealed class PostgresLogStore(NpgsqlDataSource dataSource)
         CancellationToken ct = default)
     {
         // Several instances of one release report the same version; they share a deployment when they start close together
+        // Only the application's latest deployment can be shared: a roll-back to a version that ran minutes ago is a new
+        // deployment, not the old one, or the running version would still show the release that was rolled back
         await using var find = dataSource.CreateCommand("""
-            select id from deployments
-            where application = $1 and environment is not distinct from $2 and version is not distinct from $3
-              and commit_sha is not distinct from $4 and abs(extract(epoch from started_at - $5)) < 300
-            order by started_at desc limit 1
+            select id from (
+                select id, version, commit_sha, started_at from deployments
+                where application = $1 and environment is not distinct from $2
+                order by started_at desc limit 1
+            ) latest
+            where version is not distinct from $3 and commit_sha is not distinct from $4
+              and abs(extract(epoch from started_at - $5)) < 300
             """);
         find.Parameters.Add(new() { Value = application });
         find.Parameters.Add(new() { Value = (object?)environment ?? DBNull.Value, NpgsqlDbType = NpgsqlDbType.Text });

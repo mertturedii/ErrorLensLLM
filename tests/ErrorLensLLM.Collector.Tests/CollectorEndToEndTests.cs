@@ -135,6 +135,30 @@ public sealed class CollectorEndToEndTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
+    [Fact]
+    public async Task Roll_back_within_minutes_is_a_new_deployment()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-ErrorLens-Key", "test-key");
+        var t0 = DateTimeOffset.UtcNow;
+
+        async Task Announce(string version, DateTimeOffset startedAt) =>
+            Assert.Equal(HttpStatusCode.Accepted, (await client.PostAsJsonAsync("/api/ingest/logs", new IngestBatch
+            {
+                Source = new IngestSource { Application = "kayit", Environment = "test", Version = version, StartedAt = startedAt },
+                Events = []
+            })).StatusCode);
+
+        await Announce("1.0.0", t0);
+        await Announce("1.0.0", t0.AddSeconds(2));   // a second instance of the same release
+        await Announce("1.1.0", t0.AddSeconds(60));
+        await Announce("1.0.0", t0.AddSeconds(120)); // roll-back, within five minutes of the first 1.0.0
+
+        await using var db = NpgsqlDataSource.Create(ConnectionString);
+        Assert.Equal(3L, await Scalar(db, "select count(*) from deployments"));
+        Assert.Equal("1.0.0", await Scalar(db, "select version from deployments order by started_at desc limit 1"));
+    }
+
     private static async Task<object?> Scalar(NpgsqlDataSource db, string sql)
     {
         await using var command = db.CreateCommand(sql);
