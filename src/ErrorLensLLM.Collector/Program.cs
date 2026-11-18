@@ -6,6 +6,7 @@ using ErrorLensLLM.AI.Claude;
 using ErrorLensLLM.Collector.Anomalies;
 using ErrorLensLLM.Collector.Explanations;
 using ErrorLensLLM.Collector.Incidents;
+using ErrorLensLLM.Collector.Settings;
 using ErrorLensLLM.Collector.Ingestion;
 using ErrorLensLLM.Core.Incidents;
 using ErrorLensLLM.Core.Ingestion;
@@ -29,7 +30,6 @@ builder.Services.AddSingleton<IngestService>();
 
 builder.Services.Configure<AnalysisOptions>(builder.Configuration.GetSection(AnalysisOptions.Section));
 builder.Services.AddSingleton<PostgresIncidentStore>();
-builder.Services.AddSingleton(new IncidentCorrelator());
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IncidentAnalyzer>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IncidentAnalyzer>());
@@ -39,28 +39,18 @@ builder.Services.AddSingleton<PostgresAnomalyStore>();
 builder.Services.AddSingleton<AnomalyMonitor>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AnomalyMonitor>());
 
-// LLM explanation layer: Claude (ANTHROPIC_API_KEY or Claude:ApiKey) or Gemini (GEMINI_API_KEY or Gemini:ApiKey).
-// Explanation:Provider picks one when both keys are set; without a key the layer is off.
-var claude = builder.Configuration.GetSection(ClaudeOptions.Section).Get<ClaudeOptions>() ?? new ClaudeOptions();
-claude.ApiKey ??= Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
-var gemini = builder.Configuration.GetSection(GeminiOptions.Section).Get<GeminiOptions>() ?? new GeminiOptions();
-gemini.ApiKey ??= Environment.GetEnvironmentVariable("GEMINI_API_KEY");
-var provider = builder.Configuration["Explanation:Provider"]?.ToLowerInvariant()
-               ?? (!string.IsNullOrWhiteSpace(claude.ApiKey) ? "claude" : !string.IsNullOrWhiteSpace(gemini.ApiKey) ? "gemini" : null);
-IIncidentExplainer? explainer = provider switch
-{
-    "claude" when !string.IsNullOrWhiteSpace(claude.ApiKey) => new IncidentExplainer(new AnthropicClient { ApiKey = claude.ApiKey }, claude),
-    "gemini" when !string.IsNullOrWhiteSpace(gemini.ApiKey) => new GeminiExplainer(new HttpClient { Timeout = TimeSpan.FromMinutes(2) }, gemini),
-    _ => null
-};
+// Settings screen: tunable values and LLM providers live in the database and are read again every few seconds
+ApiKeyProtector.AddTo(builder.Services, builder.Configuration);
+builder.Services.AddSingleton<PostgresSettingsStore>();
+builder.Services.AddSingleton<RuntimeSettings>();
+
+// LLM explanation layer: the default provider of the settings screen (Claude, Gemini or ChatGPT). Its key is the one
+// entered there, or else Claude:ApiKey / ANTHROPIC_API_KEY, Gemini:ApiKey / GEMINI_API_KEY, OpenAI:ApiKey / OPENAI_API_KEY.
 builder.Services.AddSingleton<PostgresExplanationStore>();
 builder.Services.AddSingleton<PostgresDashboardStore>();
-if (explainer is not null)
-{
-    builder.Services.AddSingleton(explainer);
-    builder.Services.AddSingleton<ExplanationService>();
-    builder.Services.AddHostedService(sp => sp.GetRequiredService<ExplanationService>());
-}
+builder.Services.AddSingleton<ExplanationRouter>();
+builder.Services.AddSingleton<ExplanationService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ExplanationService>());
 
 var app = builder.Build();
 
@@ -68,9 +58,9 @@ await app.Services.GetRequiredService<PostgresLogStore>().EnsureSchemaAsync();
 await app.Services.GetRequiredService<PostgresIncidentStore>().EnsureSchemaAsync();
 await app.Services.GetRequiredService<PostgresAnomalyStore>().EnsureSchemaAsync();
 await app.Services.GetRequiredService<PostgresExplanationStore>().EnsureSchemaAsync();
-app.Logger.LogInformation(explainer is null
-    ? "LLM explanations are off: set ANTHROPIC_API_KEY or GEMINI_API_KEY to turn them on"
-    : "LLM explanations are on with {Model}", explainer?.Model);
+await app.Services.GetRequiredService<PostgresSettingsStore>().EnsureSchemaAsync();
+await SeedProvidersAsync(app.Services.GetRequiredService<PostgresSettingsStore>(), app.Configuration);
+_ = await app.Services.GetRequiredService<ExplanationRouter>().ActiveAsync(); // logs whether the layer is on
 
 app.MapGet("/health", async (NpgsqlDataSource db, CancellationToken ct) =>
 {
@@ -92,8 +82,9 @@ app.MapPost("/api/incidents/{id:guid}/explain", async (Guid id, HttpRequest requ
     var config = options.Value;
     if (!string.IsNullOrEmpty(config.ApiKey) && !KeyMatches(request.Headers["X-ErrorLens-Key"].ToString(), config.ApiKey))
         return Results.Unauthorized();
-    if (services.GetService<ExplanationService>() is not { } explanations)
+    if (await services.GetRequiredService<ExplanationRouter>().ActiveAsync(ct) is null)
         return Results.Json(new { error = "LLM explanations are off" }, statusCode: StatusCodes.Status409Conflict);
+    var explanations = services.GetRequiredService<ExplanationService>();
 
     await explanations.ExplainAsync(id, ct);
     return Results.Accepted();
@@ -119,6 +110,31 @@ app.Run();
 
 static bool KeyMatches(string given, string expected) =>
     CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(given), Encoding.UTF8.GetBytes(expected));
+
+// Every supported provider gets a row on the settings screen; the default is Explanation:Provider, else the first one
+// whose key is in the configuration or the environment. Rows already there keep what was set on the screen.
+static async Task SeedProvidersAsync(PostgresSettingsStore store, IConfiguration configuration)
+{
+    string? Key(LlmProviderInfo p) =>
+        configuration[$"{SectionOf(p.Name)}:ApiKey"] is { Length: > 0 } k ? k : Environment.GetEnvironmentVariable(p.KeyVariable);
+    var preferred = configuration["Explanation:Provider"]?.ToLowerInvariant()
+                    ?? LlmProviders.All.FirstOrDefault(p => !string.IsNullOrWhiteSpace(Key(p)))?.Name
+                    ?? LlmProviders.Gemini;
+
+    foreach (var provider in LlmProviders.All)
+    {
+        var section = configuration.GetSection(SectionOf(provider.Name));
+        await store.SeedProviderAsync(provider.Name, provider.DisplayName, section["Model"] ?? provider.DefaultModel,
+            int.TryParse(section["MaxOutputTokens"] ?? section["MaxTokens"], out var max) ? max : 8000, provider.Name == preferred);
+    }
+}
+
+static string SectionOf(string provider) => provider switch
+{
+    LlmProviders.Claude => ClaudeOptions.Section,
+    LlmProviders.Gemini => GeminiOptions.Section,
+    _ => OpenAiOptions.Section
+};
 
 /// <summary>Entry point marker for WebApplicationFactory in tests.</summary>
 public partial class Program;

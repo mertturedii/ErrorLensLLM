@@ -1,0 +1,254 @@
+@page "/yapay-zeka"
+@using System.Text.Json
+@using ErrorLensLLM.AI.Claude
+@inherits RefreshingPage
+@inject PostgresSettingsStore Settings
+@inject PostgresDashboardStore Store
+@inject DashboardSession Session
+
+<PageTitle>Yapay Zekâ İstekleri · ErrorLensLLM</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>Yapay Zekâ İstekleri</h1>
+        <div class="sub">Hangi yapay zekâya ne soruldu, ne cevap verdi, kaç token harcandı</div>
+    </div>
+    <RangeTabs Value="_range" ValueChanged="SelectAsync" />
+</div>
+
+@if (_range is null)
+{
+    <div class="card empty">Yükleniyor…</div>
+}
+else
+{
+    var requests = _usage.Sum(u => u.Requests);
+    var failed = _usage.Sum(u => u.Failed);
+    var input = _usage.Sum(u => u.InputTokens);
+    var output = _usage.Sum(u => u.OutputTokens);
+
+    <div class="stats">
+        <Stat Label="İstek" Value="@DashboardFormat.Number(requests)" Hint="@($"son {_range.Label}")" />
+        <Stat Label="Başarısız" Value="@DashboardFormat.Number(failed)" Hint="@DashboardFormat.Rate(failed, requests)" Tone="@(failed > 0 ? "warning" : null)" />
+        <Stat Label="Giriş token'ı" Value="@DashboardFormat.Number(input)" Hint="istem (prompt)" />
+        <Stat Label="Çıkış token'ı" Value="@DashboardFormat.Number(output)" Hint="cevap" />
+        <Stat Label="Toplam token" Value="@DashboardFormat.Number(input + output)" Hint="@(requests == 0 ? "—" : $"istek başına {DashboardFormat.Number((input + output) / requests)}")" />
+    </div>
+
+    <section class="card flush">
+        <h2>Sağlayıcı ve model bazında kullanım</h2>
+        @if (_usage.Count == 0)
+        {
+            <div class="empty">Bu aralıkta yapay zekâya istek gönderilmedi.</div>
+        }
+        else
+        {
+            <div class="scroll-x">
+                <table class="list">
+                    <thead>
+                        <tr>
+                            <th>Sağlayıcı</th>
+                            <th>Model</th>
+                            <th class="num">İstek</th>
+                            <th class="num">Başarısız</th>
+                            <th class="num">Giriş token</th>
+                            <th class="num">Çıkış token</th>
+                            <th class="num">Toplam</th>
+                            <th class="hide-narrow">Son istek</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in _usage)
+                        {
+                            <tr>
+                                <td>@ProviderName(row.Provider)</td>
+                                <td><code>@row.Model</code></td>
+                                <td class="num">@DashboardFormat.Number(row.Requests)</td>
+                                <td class="num">@DashboardFormat.Number(row.Failed)</td>
+                                <td class="num">@DashboardFormat.Number(row.InputTokens)</td>
+                                <td class="num">@DashboardFormat.Number(row.OutputTokens)</td>
+                                <td class="num"><strong>@DashboardFormat.Number(row.InputTokens + row.OutputTokens)</strong></td>
+                                <td class="hide-narrow nowrap">@Format.Stamp(row.LastAt)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+
+    <section class="card flush">
+        <div class="card-head">
+            <h2>İstekler</h2>
+        </div>
+        <div class="filters" style="padding:0 18px">
+            <select aria-label="Sağlayıcı" @bind="_provider" @bind:after="ReloadAsync">
+                <option value="">Tüm sağlayıcılar</option>
+                @foreach (var p in LlmProviders.All)
+                {
+                    <option value="@p.Name">@p.DisplayName</option>
+                }
+            </select>
+            <label style="display:flex;gap:6px;align-items:center" class="small">
+                <input type="checkbox" @bind="_failedOnly" @bind:after="ReloadAsync" /> Yalnız başarısızlar
+            </label>
+            <span class="count">son @_requests.Count istek</span>
+        </div>
+        @if (_requests.Count == 0)
+        {
+            <div class="empty">Bu filtrelerle istek yok.</div>
+        }
+        else
+        {
+            <div class="scroll-x">
+                <table class="list">
+                    <thead>
+                        <tr>
+                            <th>Zaman</th>
+                            <th>Sağlayıcı / model</th>
+                            <th class="hide-narrow">Olay</th>
+                            <th class="num">Giriş</th>
+                            <th class="num">Çıkış</th>
+                            <th class="num">Süre</th>
+                            <th>Durum</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in _requests)
+                        {
+                            <tr class="expandable @(_open.Contains(r.Id) ? "open" : "")" @onclick="() => ToggleAsync(r.Id)" title="İstem ve cevap için tıkla">
+                                <td class="nowrap">@Format.Stamp(r.CreatedAt)</td>
+                                <td>@ProviderName(r.Provider)<div class="muted small"><code>@r.Model</code> · @r.Purpose</div></td>
+                                <td class="hide-narrow">
+                                    @if (r.IncidentId is { } incident)
+                                    {
+                                        <a href="olaylar/@incident" @onclick:stopPropagation="true">@(_titles.GetValueOrDefault(incident) ?? incident.ToString()[..8])</a>
+                                    }
+                                </td>
+                                <td class="num">@DashboardFormat.Number(r.InputTokens)</td>
+                                <td class="num">@DashboardFormat.Number(r.OutputTokens)</td>
+                                <td class="num nowrap">@Seconds(r.DurationMs)</td>
+                                <td>
+                                    @if (r.Error is null)
+                                    {
+                                        <span class="badge good"><span class="dot"></span>başarılı</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bad"><span class="dot"></span>hata</span>
+                                    }
+                                </td>
+                            </tr>
+                            @if (_open.Contains(r.Id))
+                            {
+                                <tr class="log-detail">
+                                    <td colspan="7">
+                                        @if (_details.TryGetValue(r.Id, out var d))
+                                        {
+                                            <dl class="log-meta small">
+                                                <div><dt>İstek</dt><dd><code>#@d.Id</code></dd></div>
+                                                <div><dt>Zaman</dt><dd>@Format.DateTime(d.CreatedAt)</dd></div>
+                                                <div><dt>Sağlayıcı</dt><dd>@ProviderName(d.Provider)</dd></div>
+                                                <div><dt>Model</dt><dd><code>@d.Model</code></dd></div>
+                                                <div><dt>Token</dt><dd>@DashboardFormat.Number(d.InputTokens) giriş · @DashboardFormat.Number(d.OutputTokens) çıkış</dd></div>
+                                                <div><dt>Süre</dt><dd>@Seconds(d.DurationMs)</dd></div>
+                                            </dl>
+                                            @if (d.Error is not null)
+                                            {
+                                                <div class="log-section">
+                                                    <div class="muted small">Hata</div>
+                                                    <pre class="stack prompt">@d.Error</pre>
+                                                </div>
+                                            }
+                                            <div class="log-section">
+                                                <div class="muted small">Sistem istemi (talimatlar)</div>
+                                                <pre class="stack prompt">@d.SystemPrompt</pre>
+                                            </div>
+                                            <div class="log-section">
+                                                <div class="muted small">Kullanıcı istemi (sorulan: maskelenmiş olay verisi)</div>
+                                                <pre class="stack prompt">@d.UserPrompt</pre>
+                                            </div>
+                                            @if (d.Response is not null)
+                                            {
+                                                <div class="log-section">
+                                                    <div class="muted small">Cevap</div>
+                                                    <pre class="stack prompt">@Pretty(d.Response)</pre>
+                                                </div>
+                                            }
+                                        }
+                                        else
+                                        {
+                                            <span class="muted small">Yükleniyor…</span>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+
+    <p class="foot-note">
+        Her istek gönderildiği gibi saklanır; olay verisi yapay zekâya gitmeden önce collector'da maskelenmiştir.
+        Sağlayıcı ve anahtar <a href="ayarlar">Sistem Ayarları</a> ekranından değiştirilir. Son güncelleme @(Updated is { } u ? Format.Time(u) : "—")
+    </p>
+}
+
+@code {
+    private TimeRange? _range;
+    private IReadOnlyList<LlmUsageRow> _usage = [];
+    private IReadOnlyList<LlmRequestRow> _requests = [];
+    private readonly Dictionary<Guid, string> _titles = [];
+    private readonly HashSet<long> _open = [];
+    private readonly Dictionary<long, LlmRequestRow> _details = [];
+    private string _provider = "";
+    private bool _failedOnly;
+
+    protected override async Task LoadAsync()
+    {
+        _range ??= Session.Range ??= TimeRange.Fit(await Store.LatestLogAsync(Stopping));
+        var from = DateTimeOffset.UtcNow - _range.Span;
+        _usage = await Settings.UsageAsync(from, Stopping);
+        _requests = await Settings.RequestsAsync(from, _provider.Length == 0 ? null : _provider, _failedOnly, 100, Stopping);
+
+        foreach (var id in _requests.Select(r => r.IncidentId).OfType<Guid>().Distinct().Where(id => !_titles.ContainsKey(id)))
+        {
+            if (await Store.GetIncidentAsync(id, Stopping) is { } incident)
+                _titles[id] = incident.Summary.Title;
+        }
+    }
+
+    private async Task SelectAsync(TimeRange range)
+    {
+        _range = Session.Range = range;
+        await ReloadAsync();
+    }
+
+    private async Task ToggleAsync(long id)
+    {
+        if (_open.Remove(id))
+            return;
+        _open.Add(id);
+        if (!_details.ContainsKey(id) && await Settings.RequestAsync(id, Stopping) is { } detail)
+            _details[id] = detail;
+    }
+
+    private static string ProviderName(string name) => LlmProviders.Find(name)?.DisplayName ?? name;
+
+    private static string Seconds(int ms) => ms < 1000 ? $"{ms} ms" : $"{ms / 1000.0:0.0} sn";
+
+    private static string Pretty(string text)
+    {
+        try
+        {
+            return JsonSerializer.Serialize(JsonDocument.Parse(text),
+                new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+        }
+        catch (JsonException)
+        {
+            return text;
+        }
+    }
+}

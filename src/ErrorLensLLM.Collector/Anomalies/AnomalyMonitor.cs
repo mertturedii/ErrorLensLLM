@@ -1,3 +1,4 @@
+using ErrorLensLLM.Collector.Settings;
 using ErrorLensLLM.Ml.Streaming;
 using ErrorLensLLM.Storage.PostgreSql;
 using Microsoft.Extensions.Options;
@@ -36,7 +37,8 @@ public sealed class AnomalyOptions
 /// a fault that logs no error can therefore be learned as normal at the next retrain.
 /// </summary>
 public sealed class AnomalyMonitor(
-    PostgresAnomalyStore store, IOptions<AnomalyOptions> options, TimeProvider clock, ILogger<AnomalyMonitor> log) : BackgroundService
+    PostgresAnomalyStore store, IOptions<AnomalyOptions> options, TimeProvider clock, ILogger<AnomalyMonitor> log,
+    RuntimeSettings? settings = null) : BackgroundService
 {
     private sealed class ModuleState(StreamAnomalyModel model, DateTimeOffset trainedAt, List<int> context)
     {
@@ -129,7 +131,15 @@ public sealed class AnomalyMonitor(
     private async Task TrainDueAsync(DateTimeOffset end, CancellationToken ct)
     {
         var config = options.Value;
-        var retrain = TimeSpan.FromMinutes(config.RetrainMinutes);
+        // Training period, retrain interval, minimums and thresholds come from the settings screen when it has values
+        var values = settings is null ? null : await settings.GetAsync(ct);
+        double Value(string key, double fallback) =>
+            values is null || values.IsDefault(SettingsCatalog.Anomaly, key) ? fallback : values[SettingsCatalog.Anomaly, key];
+        var retrain = TimeSpan.FromMinutes(Value("RetrainMinutes", config.RetrainMinutes));
+        var trainingMinutes = Value("TrainingMinutes", config.TrainingMinutes);
+        var minBuckets = Value("MinTrainingBuckets", config.MinTrainingBuckets);
+        var minEvents = Value("MinTrainingEvents", config.MinTrainingEvents);
+        var streamOptions = values is null ? null : RuntimeSettings.Stream(values);
         var now = clock.GetUtcNow();
 
         // Loading the training period is the expensive part; look for new or stale modules once a minute
@@ -137,7 +147,7 @@ public sealed class AnomalyMonitor(
             return;
         _lastTrainingCheck = now;
 
-        var from = end - TimeSpan.FromMinutes(config.TrainingMinutes);
+        var from = end - TimeSpan.FromMinutes(trainingMinutes);
         var events = await store.LoadEventsAsync(from, end, ct);
 
         foreach (var stream in events.GroupBy(e => e.Application))
@@ -157,10 +167,10 @@ public sealed class AnomalyMonitor(
             }
 
             var eventCount = buckets.Sum(b => b.Templates.Length);
-            if (buckets.Count < config.MinTrainingBuckets || eventCount < config.MinTrainingEvents)
+            if (buckets.Count < minBuckets || eventCount < minEvents)
                 continue;
 
-            var model = await Task.Run(() => StreamAnomalyModel.Train(buckets.Select(b => b.Templates).ToList()), ct);
+            var model = await Task.Run(() => StreamAnomalyModel.Train(buckets.Select(b => b.Templates).ToList(), streamOptions), ct);
             var context = buckets.SelectMany(b => b.Templates).TakeLast(model.ContextSize).ToList();
 
             if (existing is not null)

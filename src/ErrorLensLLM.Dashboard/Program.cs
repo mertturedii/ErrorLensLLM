@@ -18,6 +18,8 @@ builder.Services.AddSingleton<PostgresIncidentStore>();
 builder.Services.AddSingleton<PostgresAnomalyStore>();
 builder.Services.AddSingleton<PostgresExplanationStore>();
 builder.Services.AddSingleton<PostgresDashboardStore>();
+builder.Services.AddSingleton<PostgresSettingsStore>();
+ApiKeyProtector.AddTo(builder.Services, builder.Configuration);
 builder.Services.AddSingleton<DashboardFormat>();
 builder.Services.AddSingleton<ModuleColors>();
 builder.Services.AddScoped<DashboardSession>();
@@ -29,6 +31,7 @@ await app.Services.GetRequiredService<PostgresLogStore>().EnsureSchemaAsync();
 await app.Services.GetRequiredService<PostgresIncidentStore>().EnsureSchemaAsync();
 await app.Services.GetRequiredService<PostgresAnomalyStore>().EnsureSchemaAsync();
 await app.Services.GetRequiredService<PostgresExplanationStore>().EnsureSchemaAsync();
+await app.Services.GetRequiredService<PostgresSettingsStore>().EnsureSchemaAsync();
 
 if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Error", createScopeForErrors: true);

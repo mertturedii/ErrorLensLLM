@@ -5,6 +5,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Data Protection, for the API keys stored on the settings screen -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\ErrorLensLLM.Core\ErrorLensLLM.Core.csproj" />
   </ItemGroup>
 

@@ -30,7 +30,9 @@ public sealed record IncidentExplanation(
     string Confidence,
     string? Disagreement);
 
-public sealed record ExplanationResult(IncidentExplanation Explanation, string Model, long InputTokens, long OutputTokens);
+/// <summary>The explanation, the model that wrote it, its token counts and the raw answer (kept for the request log).</summary>
+public sealed record ExplanationResult(
+    IncidentExplanation Explanation, string Model, long InputTokens, long OutputTokens, string? RawResponse = null);
 
 public sealed class ClaudeOptions
 {
@@ -112,7 +114,7 @@ public sealed class IncidentExplainer(AnthropicClient client, ClaudeOptions opti
         var explanation = JsonSerializer.Deserialize<IncidentExplanation>(text, Json)
                           ?? throw new InvalidOperationException("The model returned no explanation.");
 
-        return new ExplanationResult(explanation, response.Model, response.Usage.InputTokens, response.Usage.OutputTokens);
+        return new ExplanationResult(explanation, response.Model, response.Usage.InputTokens, response.Usage.OutputTokens, text);
     }
 
     /// <summary>The user message: the incident as plain, labeled text.</summary>

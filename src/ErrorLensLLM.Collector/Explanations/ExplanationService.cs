@@ -1,34 +1,37 @@
 using System.Text.Json;
 using Anthropic.Exceptions;
 using ErrorLensLLM.AI.Claude;
+using ErrorLensLLM.Collector.Settings;
 using ErrorLensLLM.Storage.PostgreSql;
 
 namespace ErrorLensLLM.Collector.Explanations;
 
 /// <summary>
-/// Asks Claude to explain each new incident once its members have settled, and again when its root cause changes.
-/// Only registered when an API key is configured; without one the dashboard says the layer is off.
+/// Asks the default LLM provider of the settings screen to explain each new incident once its members have settled, and
+/// again when its root cause changes. Without a provider with a key it waits; the dashboard says the layer is off.
 /// </summary>
 public sealed class ExplanationService(
-    IIncidentExplainer explainer, PostgresExplanationStore explanations, PostgresDashboardStore incidents,
+    ExplanationRouter explainer, RuntimeSettings settings, PostgresExplanationStore explanations, PostgresDashboardStore incidents,
     ILogger<ExplanationService> log) : BackgroundService
 {
-    /// <summary>An incident is explained this long after it was detected, when the correlator has seen its first wave.</summary>
-    private static readonly TimeSpan Settle = TimeSpan.FromSeconds(30);
-
-    private static readonly TimeSpan RetryAfter = TimeSpan.FromMinutes(10);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // Older incidents (from before the layer was switched on) are not explained retroactively
-        var since = DateTimeOffset.UtcNow.AddHours(-1);
+        var started = DateTimeOffset.UtcNow;
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
         do
         {
             try
             {
-                while (await explanations.NextPendingAsync(Settle, RetryAfter, since, stoppingToken) is { } id)
+                var values = await settings.GetAsync(stoppingToken);
+                var settle = TimeSpan.FromSeconds(values[SettingsCatalog.Incidents, "ExplainSettleSeconds"]);
+                var retryAfter = TimeSpan.FromMinutes(values[SettingsCatalog.Incidents, "ExplainRetryMinutes"]);
+                var since = started - TimeSpan.FromMinutes(values[SettingsCatalog.Incidents, "ExplainLookbackMinutes"]);
+
+                while (await explainer.ActiveAsync(stoppingToken) is not null
+                       && await explanations.NextPendingAsync(settle, retryAfter, since, stoppingToken) is { } id)
                     await ExplainAsync(id, stoppingToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -46,9 +49,10 @@ public sealed class ExplanationService(
             return;
 
         var context = await BuildContextAsync(detail, ct);
+        var model = (await explainer.ActiveAsync(ct))?.Model ?? "-";
         try
         {
-            var result = await explainer.ExplainAsync(context, ct);
+            var result = await explainer.ExplainAsync(id, context, ct);
             await explanations.SaveAsync(new ExplanationRow(
                 id, detail.RootFingerprint, result.Model, JsonSerializer.Serialize(result.Explanation, Json), null,
                 result.InputTokens, result.OutputTokens, DateTimeOffset.UtcNow), ct);
@@ -56,11 +60,11 @@ public sealed class ExplanationService(
                 id, result.Model, result.InputTokens, result.OutputTokens);
         }
         // A request timeout is a TaskCanceledException too; only a shutdown may stop the service
-        catch (Exception ex) when (ex is AnthropicException or InvalidOperationException or JsonException or HttpRequestException
+        catch (Exception ex) when (ex is AnthropicException or InvalidOperationException or JsonException or HttpRequestException or ArgumentException
                                        || (ex is TaskCanceledException && !ct.IsCancellationRequested))
         {
             // Stored so that the dashboard can say why, and so that the incident is not retried on every tick
-            await explanations.SaveAsync(new ExplanationRow(id, detail.RootFingerprint, explainer.Model, null, ex.Message, 0, 0, DateTimeOffset.UtcNow), ct);
+            await explanations.SaveAsync(new ExplanationRow(id, detail.RootFingerprint, model, null, ex.Message, 0, 0, DateTimeOffset.UtcNow), ct);
             log.LogWarning(ex, "Could not explain incident {Incident}", id);
         }
     }

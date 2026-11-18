@@ -1,3 +1,4 @@
+using ErrorLensLLM.Collector.Settings;
 using ErrorLensLLM.Core.Incidents;
 using ErrorLensLLM.Storage.PostgreSql;
 using Microsoft.Extensions.Options;
@@ -19,7 +20,8 @@ public sealed class AnalysisOptions
 
 /// <summary>Periodically correlates recent errors into incidents and stores them.</summary>
 public sealed class IncidentAnalyzer(
-    PostgresIncidentStore store, IncidentCorrelator correlator, IOptions<AnalysisOptions> options, TimeProvider clock, ILogger<IncidentAnalyzer> log)
+    PostgresIncidentStore store, IOptions<AnalysisOptions> options, TimeProvider clock, ILogger<IncidentAnalyzer> log,
+    RuntimeSettings? settings = null)
     : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -43,13 +45,20 @@ public sealed class IncidentAnalyzer(
     public async Task<int> RunOnceAsync(CancellationToken ct)
     {
         var now = clock.GetUtcNow();
-        var since = now.AddMinutes(-options.Value.WindowMinutes);
+        // Window, closing time and correlation come from the settings screen; appsettings only seeds the first two
+        var values = settings is null ? null : await settings.GetAsync(ct);
+        var windowMinutes = values is null || values.IsDefault(SettingsCatalog.Incidents, "WindowMinutes")
+            ? options.Value.WindowMinutes : values[SettingsCatalog.Incidents, "WindowMinutes"];
+        var closeMinutes = values is null || values.IsDefault(SettingsCatalog.Incidents, "CloseAfterMinutes")
+            ? options.Value.CloseAfterMinutes : values[SettingsCatalog.Incidents, "CloseAfterMinutes"];
+        var correlator = new IncidentCorrelator(values is null ? null : RuntimeSettings.Correlation(values));
+        var since = now.AddMinutes(-windowMinutes);
 
         var errors = await store.LoadErrorsAsync(since, ct);
         // Deployments a little older than the window can still explain its first errors
         var deployments = await store.LoadDeploymentsAsync(since.AddMinutes(-10), ct);
 
-        var quiet = TimeSpan.FromMinutes(options.Value.CloseAfterMinutes);
+        var quiet = TimeSpan.FromMinutes(closeMinutes);
         await store.CloseQuietAsync(now - quiet, ct);
 
         // Oldest first, so that a recurrence finds the earlier incident already stored (and only joins it if close in time)

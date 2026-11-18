@@ -538,3 +538,21 @@ a code { color: inherit; }
 .measure .big { font-size: 18px; font-weight: 600; }
 a.link-card { display: flex; flex-direction: column; gap: 4px; text-decoration: none; color: inherit; }
 a.link-card:hover { background: var(--surface-2); }
+
+/* ---------- Settings ---------- */
+
+input.field { font: inherit; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px; width: 100%; }
+input.field.num { max-width: 140px; text-align: right; }
+.provider { border-top: 1px solid var(--grid); padding: 14px 0; }
+.provider:first-of-type { border-top: 0; }
+.provider-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: space-between; }
+.provider-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 20px; margin-top: 12px; }
+@media (max-width: 900px) { .provider-grid { grid-template-columns: 1fr; } }
+.field-label { font-size: 12.5px; color: var(--text-secondary); margin-bottom: 4px; display: block; }
+.row-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+.key-line { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.key-line code { word-break: break-all; }
+.setting-row td { vertical-align: middle; }
+.note-ok { color: var(--good); font-size: 13px; }
+.note-bad { color: var(--critical); font-size: 13px; }
+pre.prompt { white-space: pre-wrap; word-break: break-word; max-height: 420px; }

@@ -107,9 +107,11 @@ public sealed class PostgresIncidentStore(NpgsqlDataSource dataSource)
     }
 
     /// <summary>
-    /// Stores a correlated incident. If any of its groups already belongs to an open incident that was still active
-    /// after <paramref name="activeSince"/>, that incident is updated (the oldest one when several match; the others
-    /// are marked merged into it). Returns the incident id.
+    /// Stores a correlated incident. If any of its groups already belongs to an incident that was still active after
+    /// <paramref name="activeSince"/>, that incident is updated (the oldest one when several match; the others are marked
+    /// merged into it). Closed incidents count too: the errors of a closed incident stay in the analysis window for a
+    /// while, and without this every run would store them again as a new incident. A closed incident reopens only when
+    /// the draft has errors after its last one. Returns the incident id.
     /// </summary>
     public async Task<Guid> SaveAsync(IncidentDraft draft, string title, DateTimeOffset activeSince, CancellationToken ct = default)
     {
@@ -120,7 +122,7 @@ public sealed class PostgresIncidentStore(NpgsqlDataSource dataSource)
         var existing = new List<Guid>();
         await using (var find = new NpgsqlCommand("""
             select distinct i.id, i.started_at from incidents i join incident_groups g on g.incident_id = i.id
-            where i.status = 'open' and i.last_seen >= $2 and g.fingerprint = any($1)
+            where i.status <> 'merged' and i.last_seen >= $2 and g.fingerprint = any($1)
             order by i.started_at
             """, connection, transaction))
         {
@@ -147,6 +149,7 @@ public sealed class PostgresIncidentStore(NpgsqlDataSource dataSource)
                                    suspected_deployment_id, applications, occurrences, members)
             values ($1, 'open', $2, $3, $4, $5, $6, $7, $8, $9, $10)
             on conflict (id) do update set
+                status = case when excluded.last_seen > incidents.last_seen then 'open' else incidents.status end,
                 started_at = least(incidents.started_at, excluded.started_at),
                 last_seen = excluded.last_seen, title = excluded.title, category = excluded.category,
                 root_fingerprint = excluded.root_fingerprint, suspected_deployment_id = excluded.suspected_deployment_id,

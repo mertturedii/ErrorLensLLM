@@ -215,6 +215,8 @@ root cause, impact, next steps, confidence, and a separate field for disagreeing
 the decision and the feedback form still judges it; the explanation helps a developer read it. A refusal is retried by a
 fallback model on the server (`fallbacks: "default"`). Without a key the layer is off and the dashboard says so.
 
+ChatGPT (OpenAI Chat Completions with a strict JSON Schema, [OpenAiExplainer](src/ErrorLensLLM.AI.Claude/OpenAiExplainer.cs)) is the third. The provider in use is the default one on the settings screen; every request is logged in `llm_requests`.
+
 Gemini is the second provider ([GeminiExplainer](src/ErrorLensLLM.AI.Claude/GeminiExplainer.cs), default model
 `gemini-3.5-flash-lite`, key from `GEMINI_API_KEY`), with the same prompt and JSON schema; `Explanation:Provider`
 (`claude` or `gemini`) picks one, otherwise whichever key is set wins, Claude first. 429/5xx answers are retried with
@@ -303,6 +305,19 @@ every 2 s.
 - **Request trace (`/izler/{traceId}`):** every log of one request across modules in time order, with the milliseconds
   since its start; the services it reached, those that failed, and where it failed first. Services are listed in the
   order of their first log, which is not always the call order (parent span ids are not stored yet).
+- **Anomaly detection (`/anomaliler`):** per service, the current model (training period and data, top-g, thresholds,
+  normal volume range) and one chart per detector (DeepLog share, Isolation Forest score, events per bucket) with its
+  threshold or band; flagged buckets filtered by service and detector, each opening to every detector's value against
+  its threshold, the unseen templates, an incident of the service at that time and the bucket's logs.
+- **AI requests (`/yapay-zeka`):** every LLM request with its provider, model, incident, input and output tokens,
+  duration and error; usage per provider and model; a request opens to the system prompt, the masked incident text sent
+  and the answer.
+- **System settings (`/ayarlar`):** the LLM providers (Claude, Gemini, ChatGPT): on/off, default, model, output limit
+  and API key. Keys are stored encrypted with ASP.NET Data Protection (key ring in `~/.errorlens/keys`), shown as their
+  first and last four characters and revealed with a button; a key entered here wins over the environment variable.
+  The values that used to be constants are here too: incident window and closing time, explanation timing, root cause
+  weights and windows, anomaly training and thresholds. The collector reads them every 10 s, without a restart. The
+  dashboard has no login yet, so anyone who can open it can read and change these.
 - **Evaluation (`/degerlendirme`):** Top-1 and Top-3 accuracy of the suggested root cause from developer verdicts.
 - **Feedback:** developers mark the suggested root cause correct or wrong, and can pick the real one.
   Verdicts are stored with the suggestion they judged (`incident_feedback`), which makes them evaluation data for the
@@ -319,7 +334,7 @@ an old one after an update.
 | `src/ErrorLensLLM.Ml` | Drain parser, Isolation Forest, DeepLog, detection metrics, live stream model | ✅ |
 | `src/ErrorLensLLM.Core` | PII masking, message normalization, fingerprinting, incident correlation, error clustering | ✅ |
 | `experiments/ErrorLensLLM.Experiments` | Reproducible experiments: HDFS, BGL, fault injection | ✅ |
-| `tests/` | Unit and integration tests for Core, Ml and the collector (88) | ✅ |
+| `tests/` | Unit and integration tests for Core, Ml and the collector (96) | ✅ |
 | `src/ErrorLensLLM.Serilog` | Serilog sink that sends logs to the collector | ✅ |
 | `src/ErrorLensLLM.Collector` | Ingestion API (masking, templating, fingerprinting), incident analyzer, anomaly monitor, explanations | ✅ |
 | `src/ErrorLensLLM.Dashboard` | Blazor Server dashboard: overview, incidents, error groups, deployments, log monitoring, evaluation | ✅ |
@@ -341,6 +356,8 @@ an old one after an update.
 - [x] LLM explanation layer
 - [x] Evaluation with fault injection scenarios (top-k root cause accuracy)
 - [x] Request trace screen, full log details, search by trace id and log id
+- [x] Settings screen (LLM providers with encrypted keys, tunable values), AI request log, ChatGPT provider
+- [ ] Dashboard login, before the settings screen is exposed beyond a demo
 - [ ] Parent span ids, to show the real call order on the trace screen
 - [ ] LogBERT (future work)
 - [ ] Source code at the deployed commit as context for the LLM (`ErrorLensLLM.Source.Bitbucket`)

@@ -94,7 +94,7 @@ public sealed class GeminiExplainer(HttpClient http, GeminiOptions options) : II
 
         var usage = root["usageMetadata"];
         return new ExplanationResult(explanation, root["modelVersion"]?.GetValue<string>() ?? options.Model,
-            usage?["promptTokenCount"]?.GetValue<long>() ?? 0, usage?["candidatesTokenCount"]?.GetValue<long>() ?? 0);
+            usage?["promptTokenCount"]?.GetValue<long>() ?? 0, usage?["candidatesTokenCount"]?.GetValue<long>() ?? 0, answer);
     }
 
     private static string Shorten(string text) => text.Length <= 500 ? text : text[..500] + "…";

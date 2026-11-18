@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ErrorLensLLM.Storage.PostgreSql\ErrorLensLLM.Storage.PostgreSql.csproj" />
+    <ProjectReference Include="..\ErrorLensLLM.AI.Claude\ErrorLensLLM.AI.Claude.csproj" />
   </ItemGroup>
 
 </Project>

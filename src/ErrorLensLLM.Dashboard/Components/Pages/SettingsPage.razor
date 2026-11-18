@@ -1,0 +1,339 @@
+@page "/ayarlar"
+@using System.Globalization
+@using ErrorLensLLM.AI.Claude
+@inject PostgresSettingsStore Settings
+@inject ApiKeyProtector Protector
+@inject IConfiguration Configuration
+
+<PageTitle>Sistem Ayarları · ErrorLensLLM</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>Sistem Ayarları</h1>
+        <div class="sub">Yapay zekâ sağlayıcıları ve eskiden koda gömülü olan değerler. Collector değişiklikleri en geç 10 saniye içinde, yeniden başlatmadan uygular.</div>
+    </div>
+</div>
+
+@if (_providers is null || _values is null)
+{
+    <div class="card empty">Yükleniyor…</div>
+}
+else
+{
+    var active = Active();
+
+    <section class="card">
+        <div class="card-head">
+            <h2>Yapay zekâ sağlayıcıları</h2>
+            @if (active is null)
+            {
+                <span class="badge bad"><span class="dot"></span>Açıklama katmanı kapalı: varsayılan sağlayıcı açık değil ya da anahtarı yok</span>
+            }
+            else
+            {
+                <span class="badge good"><span class="dot"></span>Olaylar @active.DisplayName (@active.Model) ile açıklanıyor</span>
+            }
+        </div>
+        <div class="callout small">
+            Anahtarlar veritabanında şifreli saklanır (ASP.NET Data Protection). Ekranda ilk ve son dört karakteri görünür; tamamı yalnız
+            "Göster" ile açılır. Bu ekranda henüz giriş (login) yok: sayfaya erişebilen herkes anahtarları görebilir ve değiştirebilir.
+        </div>
+
+        @foreach (var p in _providers)
+        {
+            var info = LlmProviders.Find(p.Name);
+            var edit = _edits[p.Name];
+            var envKey = info is null ? null : EnvKey(info);
+            <div class="provider" @key="p.Name">
+                <div class="provider-head">
+                    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                        <strong>@p.DisplayName</strong>
+                        @if (p.IsDefault)
+                        {
+                            <span class="badge accent"><span class="dot"></span>varsayılan</span>
+                        }
+                        @if (!p.Enabled)
+                        {
+                            <span class="badge"><span class="dot"></span>kapalı</span>
+                        }
+                        @if (p.ProtectedApiKey is null && envKey is null)
+                        {
+                            <span class="badge warn"><span class="dot"></span>anahtar yok</span>
+                        }
+                    </div>
+                    <div class="row-actions" style="margin-top:0">
+                        @if (!p.IsDefault)
+                        {
+                            <button class="secondary" @onclick="() => MakeDefaultAsync(p.Name)">Varsayılan yap</button>
+                        }
+                        @if (info is not null)
+                        {
+                            <a class="small" href="@info.KeyPage" target="_blank" rel="noopener">Anahtar al →</a>
+                        }
+                    </div>
+                </div>
+
+                <div class="provider-grid">
+                    <div>
+                        <span class="field-label">API anahtarı</span>
+                        <div class="key-line">
+                            @if (p.ProtectedApiKey is not null)
+                            {
+                                <code>@(_revealed.Contains(p.Name) ? Protector.Unprotect(p.ProtectedApiKey) ?? "(bu makinedeki anahtarla çözülemedi)" : p.KeyHint)</code>
+                                <span class="muted small">ayarlar ekranından</span>
+                            }
+                            else if (envKey is not null)
+                            {
+                                <code>@(_revealed.Contains(p.Name) ? envKey : ApiKeyProtector.Hint(envKey))</code>
+                                <span class="muted small">ortam değişkeninden (@info!.KeyVariable)</span>
+                            }
+                            else
+                            {
+                                <span class="muted small">tanımlı değil@(info is null ? "" : $" (ayarlar ekranı ya da {info.KeyVariable})")</span>
+                            }
+                            @if (p.ProtectedApiKey is not null || envKey is not null)
+                            {
+                                <button class="secondary small" @onclick="() => ToggleReveal(p.Name)">@(_revealed.Contains(p.Name) ? "Gizle" : "Göster")</button>
+                            }
+                        </div>
+                        <div class="key-line" style="margin-top:8px">
+                            <input class="field" type="password" autocomplete="off" placeholder="Yeni anahtar" style="max-width:340px"
+                                   @bind="edit.NewKey" />
+                            <button class="primary" disabled="@string.IsNullOrWhiteSpace(edit.NewKey)" @onclick="() => SaveKeyAsync(p.Name)">Anahtarı kaydet</button>
+                            @if (p.ProtectedApiKey is not null)
+                            {
+                                <button class="secondary" @onclick="() => RemoveKeyAsync(p.Name)">Anahtarı sil</button>
+                            }
+                        </div>
+                    </div>
+                    <div>
+                        <div style="display:flex;gap:16px;flex-wrap:wrap">
+                            <label style="flex:2 1 200px">
+                                <span class="field-label">Model</span>
+                                <input class="field" @bind="edit.Model" />
+                            </label>
+                            <label style="flex:1 1 120px">
+                                <span class="field-label">En fazla çıktı token'ı</span>
+                                <input class="field num" type="number" min="256" max="64000" step="256" @bind="edit.MaxOutputTokens" />
+                            </label>
+                        </div>
+                        <label style="display:flex;gap:8px;align-items:center;margin-top:10px">
+                            <input type="checkbox" @bind="edit.Enabled" /> Açık
+                        </label>
+                        <div class="row-actions">
+                            <button class="primary" @onclick="() => SaveProviderAsync(p.Name)">Kaydet</button>
+                            @if (info is not null && edit.Model != info.DefaultModel)
+                            {
+                                <span class="muted small">varsayılan model: <code>@info.DefaultModel</code></span>
+                            }
+                        </div>
+                    </div>
+                </div>
+                @if (_notes.TryGetValue(p.Name, out var note))
+                {
+                    <div class="@(note.Ok ? "note-ok" : "note-bad")" style="margin-top:8px">@note.Text</div>
+                }
+            </div>
+        }
+    </section>
+
+    @foreach (var sec in SettingsCatalog.Sections)
+    {
+        var definitions = SettingsCatalog.All.Where(d => d.Section == sec.Key).ToList();
+        <section class="card flush" @key="sec.Key">
+            <div class="card-head" style="padding:0 18px">
+                <div>
+                    <h2>@sec.Title</h2>
+                    <div class="muted small">@sec.Description</div>
+                </div>
+            </div>
+            <div class="scroll-x">
+                <table class="list">
+                    <thead>
+                        <tr>
+                            <th>Ayar</th>
+                            <th class="num">Değer</th>
+                            <th>Birim</th>
+                            <th class="num hide-narrow">Varsayılan</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var d in definitions)
+                        {
+                            var key = (d.Section, d.Key);
+                            <tr class="setting-row">
+                                <td>
+                                    <strong>@d.Label</strong>
+                                    <div class="muted small">@d.Help</div>
+                                </td>
+                                <td class="num">
+                                    <input class="field num" type="number" min="@F(d.Min)" max="@F(d.Max)" step="@(d.Integer ? "1" : "any")"
+                                           value="@F(_form[key])" @onchange="e => SetField(key, e.Value)" />
+                                </td>
+                                <td class="muted small">@d.Unit</td>
+                                <td class="num hide-narrow muted">@F(d.Default)@(_values.IsDefault(d.Section, d.Key) ? "" : " · değişti")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            @if (sec.Key == SettingsCatalog.Correlation)
+            {
+                var sum = _form[(sec.Key, "UpstreamWeight")] + _form[(sec.Key, "DeploymentWeight")] + _form[(sec.Key, "OnsetWeight")];
+                if (Math.Abs(sum - 1) > 0.001)
+                {
+                    <div class="callout small" style="margin:12px 18px 0">Üç ağırlığın toplamı @F(sum). Skorlar 0–1 arasında kalsın diye toplamın 1 olması önerilir.</div>
+                }
+            }
+            <div class="row-actions" style="padding:0 18px 16px">
+                <button class="primary" @onclick="() => SaveSectionAsync(sec.Key)">Kaydet</button>
+                <button class="secondary" @onclick="() => ResetSectionAsync(sec.Key)">Varsayılana dön</button>
+                @if (_notes.TryGetValue(sec.Key, out var note))
+                {
+                    <span class="@(note.Ok ? "note-ok" : "note-bad")">@note.Text</span>
+                }
+            </div>
+        </section>
+    }
+}
+
+@code {
+    private sealed class ProviderEdit
+    {
+        public bool Enabled { get; set; }
+        public string Model { get; set; } = "";
+        public int MaxOutputTokens { get; set; }
+        public string? NewKey { get; set; }
+    }
+
+    private IReadOnlyList<LlmProviderRow>? _providers;
+    private SettingsSnapshot? _values;
+    private readonly Dictionary<string, ProviderEdit> _edits = [];
+    private readonly Dictionary<(string, string), double> _form = [];
+    private readonly HashSet<string> _revealed = [];
+    private readonly Dictionary<string, (bool Ok, string Text)> _notes = [];
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        // The dashboard can be opened before the collector has seeded the providers; a provider added in code shows up too
+        var rows = await Settings.ProvidersAsync();
+        foreach (var info in LlmProviders.All.Where(i => rows.All(r => r.Name != i.Name)))
+            await Settings.SeedProviderAsync(info.Name, info.DisplayName, info.DefaultModel, 8000, isDefault: false);
+
+        _providers = await Settings.ProvidersAsync();
+        foreach (var p in _providers)
+            _edits[p.Name] = new ProviderEdit { Enabled = p.Enabled, Model = p.Model, MaxOutputTokens = p.MaxOutputTokens };
+
+        _values = await Settings.LoadSettingsAsync();
+        foreach (var d in SettingsCatalog.All)
+            _form[(d.Section, d.Key)] = _values[d.Section, d.Key];
+    }
+
+    private string? EnvKey(LlmProviderInfo info)
+    {
+        var section = info.Name switch { LlmProviders.Claude => "Claude", LlmProviders.Gemini => "Gemini", _ => "OpenAI" };
+        var key = Configuration[$"{section}:ApiKey"];
+        if (string.IsNullOrWhiteSpace(key))
+            key = Environment.GetEnvironmentVariable(info.KeyVariable);
+        return string.IsNullOrWhiteSpace(key) ? null : key.Trim();
+    }
+
+    /// <summary>The provider the collector will use, judged the same way: default, on, and a key from here or the environment.</summary>
+    private LlmProviderRow? Active() =>
+        _providers?.FirstOrDefault(p => p.IsDefault && p.Enabled
+                                        && (p.ProtectedApiKey is not null || (LlmProviders.Find(p.Name) is { } i && EnvKey(i) is not null)));
+
+    private void ToggleReveal(string name)
+    {
+        if (!_revealed.Remove(name))
+            _revealed.Add(name);
+    }
+
+    private async Task SaveKeyAsync(string name)
+    {
+        var key = _edits[name].NewKey?.Trim();
+        if (string.IsNullOrEmpty(key))
+            return;
+        await Settings.SetApiKeyAsync(name, Protector.Protect(key), ApiKeyProtector.Hint(key));
+        _edits[name].NewKey = null;
+        await LoadAsync();
+        _notes[name] = (true, "Anahtar şifrelenip kaydedildi.");
+    }
+
+    private async Task RemoveKeyAsync(string name)
+    {
+        await Settings.SetApiKeyAsync(name, null, null);
+        _revealed.Remove(name);
+        await LoadAsync();
+        _notes[name] = (true, "Anahtar silindi; varsa ortam değişkenindeki anahtar kullanılır.");
+    }
+
+    private async Task SaveProviderAsync(string name)
+    {
+        var edit = _edits[name];
+        if (string.IsNullOrWhiteSpace(edit.Model) || edit.MaxOutputTokens is < 256 or > 64000)
+        {
+            _notes[name] = (false, "Model boş olamaz; çıktı token'ı 256–64000 arasında olmalı.");
+            return;
+        }
+
+        await Settings.UpdateProviderAsync(name, edit.Enabled, edit.Model, edit.MaxOutputTokens);
+        await LoadAsync();
+        _notes[name] = (true, "Kaydedildi.");
+    }
+
+    private async Task MakeDefaultAsync(string name)
+    {
+        await Settings.SetDefaultProviderAsync(name);
+        await LoadAsync();
+        _notes[name] = (true, "Olaylar bundan sonra bu sağlayıcıyla açıklanacak.");
+    }
+
+    private void SetField((string, string) key, object? value)
+    {
+        if (double.TryParse(Convert.ToString(value, CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture, out var number))
+            _form[key] = number;
+    }
+
+    private async Task SaveSectionAsync(string section)
+    {
+        try
+        {
+            foreach (var d in SettingsCatalog.All.Where(d => d.Section == section))
+            {
+                var value = _form[(d.Section, d.Key)];
+                // Only values that differ from the default are stored, so a later change of a default still reaches them
+                if (Math.Abs(value - d.Default) < 1e-12)
+                    continue;
+                if (value < d.Min || value > d.Max)
+                    throw new ArgumentOutOfRangeException(d.Key, $"{d.Label}: {F(d.Min)}–{F(d.Max)} arasında olmalı.");
+            }
+
+            await Settings.ResetSectionAsync(section);
+            foreach (var d in SettingsCatalog.All.Where(d => d.Section == section))
+            {
+                var value = _form[(d.Section, d.Key)];
+                if (Math.Abs(value - d.Default) >= 1e-12)
+                    await Settings.SaveSettingAsync(d.Section, d.Key, value);
+            }
+
+            await LoadAsync();
+            _notes[section] = (true, "Kaydedildi; collector en geç 10 saniye içinde uygular.");
+        }
+        catch (ArgumentOutOfRangeException e)
+        {
+            _notes[section] = (false, e.Message.Split(" (Parameter")[0]);
+        }
+    }
+
+    private async Task ResetSectionAsync(string section)
+    {
+        await Settings.ResetSectionAsync(section);
+        await LoadAsync();
+        _notes[section] = (true, "Varsayılan değerlere dönüldü.");
+    }
+
+    private static string F(double value) => value.ToString("0.####", CultureInfo.InvariantCulture);
+}
