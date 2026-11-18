@@ -60,13 +60,13 @@ public sealed class IncidentAnalyzer(
         return incidents.Count;
     }
 
-    /// <summary>"kayit 1.1.0 sonrası Npgsql.PostgresException — 3 modül, 920 hata".</summary>
+    /// <summary>"kayit 1.1.0 sonrası Npgsql.PostgresException — 3 servis, 920 hata".</summary>
     public static string Title(IncidentDraft incident)
     {
         var root = incident.RootCause;
         var trigger = incident.SuspectedDeployment is { } d ? $"{d.Application} {d.Version} sonrası " : $"{root.Application}: ";
         var type = root.ExceptionType[(root.ExceptionType.LastIndexOf('.') + 1)..];
         var modules = incident.Applications.Count();
-        return $"{trigger}{type} — {(modules > 1 ? $"{modules} modül, " : "")}{incident.Occurrences} hata";
+        return $"{trigger}{type} — {(modules > 1 ? $"{modules} servis, " : "")}{incident.Occurrences} hata";
     }
 }

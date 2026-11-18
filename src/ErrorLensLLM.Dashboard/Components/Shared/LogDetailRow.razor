@@ -14,7 +14,7 @@
                 <div><dt>Log</dt><dd><code>#@d.Id</code></dd></div>
                 <div><dt>Zaman</dt><dd>@d.Timestamp.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss.fff")</dd></div>
                 <div><dt>Seviye</dt><dd>@d.Level</dd></div>
-                <div><dt>Modül</dt><dd>@d.Application@(d.Environment is null ? "" : $" ({d.Environment})")</dd></div>
+                <div><dt>Servis</dt><dd>@d.Application@(d.Environment is null ? "" : $" ({d.Environment})")</dd></div>
                 @if (d.Version is not null)
                 {
                     <div><dt>Sürüm</dt><dd>@d.Version@(d.CommitSha is null ? "" : $" · {d.CommitSha}")</dd></div>

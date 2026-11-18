@@ -11,7 +11,7 @@ namespace ErrorLensLLM.Collector.Tests;
 public class IncidentExplainerTests
 {
     private static readonly IncidentContext Incident = new(
-        "kayit 1.1.0 sonrası PostgresException — 3 modül, 890 hata", ErrorCategory.DatabaseSchema,
+        "kayit 1.1.0 sonrası PostgresException — 3 servis, 890 hata", ErrorCategory.DatabaseSchema,
         DateTimeOffset.Parse("2026-11-17T10:00:00Z"), DateTimeOffset.Parse("2026-11-17T10:00:25Z"), 890, ["kayit", "not", "odeme"],
         "kayit 1.1.0 (commit abc123), 2026-11-17 09:59:58Z",
         [

@@ -37,7 +37,7 @@ else if (_incident is { } incident)
         <Stat Label="Süre" Value="@DashboardFormat.Duration(summary.LastSeen - summary.StartedAt)"
               Hint="@($"son hata {DashboardFormat.Relative(summary.LastSeen)}")" />
         <Stat Label="Hata" Value="@DashboardFormat.Number(summary.Occurrences)" Hint="@($"{incident.Members.Count} hata grubu")" />
-        <Stat Label="Etkilenen modül" Value="@Applications.Count.ToString()" />
+        <Stat Label="Etkilenen servis" Value="@Applications.Count.ToString()" />
         <Stat Label="Kök neden skoru" Value="@root.RootCauseScore.ToString("0.00")" Hint="@RunnerUp(incident)" />
     </div>
 
@@ -121,7 +121,7 @@ else if (_incident is { } incident)
             <section class="card">
                 <h2>Zaman çizelgesi</h2>
                 <StackedBars Points="_timeline" Bucket="_bucket" Deployments="_deployments" Series="Applications" Color="Colors.Of"
-                             Highlighted="incident.SuspectedDeployment" Label="Modül bazında zaman içindeki hata sayısı"
+                             Highlighted="incident.SuspectedDeployment" Label="Servis bazında zaman içindeki hata sayısı"
                              EmptyText="Bu olay için zaman çizelgesi verisi yok." />
             </section>
 
@@ -132,7 +132,7 @@ else if (_incident is { } incident)
                         <thead>
                             <tr>
                                 <th>#</th>
-                                <th>Modül</th>
+                                <th>Servis</th>
                                 <th>Hata</th>
                                 <th class="hide-narrow">Kategori</th>
                                 <th class="num">Sayı</th>
@@ -188,7 +188,7 @@ else if (_incident is { } incident)
                     }
                     else
                     {
-                        <p class="muted small">Örnek bir isteğin modüller arasındaki izi · trace <a href="izler/@_trace[0].TraceId"><code>@_trace[0].TraceId</code></a> · <a href="izler/@_trace[0].TraceId">isteğin tüm yolunu aç →</a></p>
+                        <p class="muted small">Örnek bir isteğin servisler arasındaki izi · trace <a href="izler/@_trace[0].TraceId"><code>@_trace[0].TraceId</code></a> · <a href="izler/@_trace[0].TraceId">isteğin tüm yolunu aç →</a></p>
                         <ol class="trace">
                             @foreach (var e in _trace)
                             {
@@ -213,7 +213,7 @@ else if (_incident is { } incident)
                             <thead>
                                 <tr>
                                     <th>Zaman</th>
-                                    <th>Modül</th>
+                                    <th>Servis</th>
                                     <th>Hata</th>
                                     <th class="hide-narrow">Trace</th>
                                 </tr>

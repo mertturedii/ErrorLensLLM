@@ -7,7 +7,7 @@
 <div class="page-head">
     <div>
         <h1>Deploylar</h1>
-        <div class="sub">Her modül açılışta sürümünü bildirir; yalnız sürüm değiştiren deploy bir olayın şüphelisi olabilir</div>
+        <div class="sub">Her servis açılışta sürümünü bildirir; yalnız sürüm değiştiren deploy bir olayın şüphelisi olabilir</div>
     </div>
     <div class="tabs" role="tablist" aria-label="Tür">
         <button role="tab" class="@(!_releasesOnly ? "active" : "")" aria-selected="@(!_releasesOnly)" @onclick="() => _releasesOnly = false">Tümü</button>
@@ -26,8 +26,8 @@
 }
 
 <div class="filters">
-    <select aria-label="Modül" @bind="_module">
-        <option value="">Tüm modüller</option>
+    <select aria-label="Servis" @bind="_module">
+        <option value="">Tüm servisler</option>
         @foreach (var module in Colors.Sort(_deployments.Select(d => d.Application)))
         {
             <option value="@module">@module</option>
@@ -55,7 +55,7 @@
                 <thead>
                     <tr>
                         <th>Zaman</th>
-                        <th>Modül</th>
+                        <th>Servis</th>
                         <th>Sürüm</th>
                         <th>Tür</th>
                         <th class="hide-narrow">Commit</th>
@@ -116,7 +116,7 @@
 </div>
 
 <p class="foot-note">
-    “Hata” sütunu, modül bu deploy ile çalışırken kaydedilen hata sayısıdır. Son güncelleme @(Updated is { } u ? Format.Time(u) : "—")
+    “Hata” sütunu, servis bu deploy ile çalışırken kaydedilen hata sayısıdır. Son güncelleme @(Updated is { } u ? Format.Time(u) : "—")
     @if (RefreshError is not null)
     {
         <span class="warn"> · yenileme başarısız, eski veri gösteriliyor</span>

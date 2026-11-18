@@ -65,15 +65,15 @@ public sealed class IncidentExplainer(AnthropicClient client, ClaudeOptions opti
     /// <summary>The instructions every provider receives.</summary>
     public const string SystemPrompt = """
         Sen bir yazılım ekibinin olay (incident) analizi asistanısın. Bir log izleme sistemi, bir dağıtımdan (deploy) sonra
-        farklı modüllerde oluşan hataları tek bir olayda topladı ve kök neden adaylarını kural tabanlı bir skorla sıraladı.
-        Sana olayın verisini veriyorum: adaylar, her adayın skoru ve kanıtları, bir isteğin modüller arasında nasıl yayıldığı,
+        farklı servislerde oluşan hataları tek bir olayda topladı ve kök neden adaylarını kural tabanlı bir skorla sıraladı.
+        Sana olayın verisini veriyorum: adaylar, her adayın skoru ve kanıtları, bir isteğin servisler arasında nasıl yayıldığı,
         kök neden adayının stack trace'i ve varsa canlı anomali tespitinin notları.
 
         Görevin bu olayı nöbetteki bir geliştiriciye açıklamak:
         - Ne olduğunu iki üç cümlede özetle.
-        - Kök nedeni açıkla: hangi modülde, hangi değişiklik ya da durum yüzünden, diğer hatalar neden onun sonucu.
+        - Kök nedeni açıkla: hangi serviste, hangi değişiklik ya da durum yüzünden, diğer hatalar neden onun sonucu.
           Yalnızca verilen veriye dayan; veride olmayan bir dosya, tablo ya da kişi uydurma. Emin olmadığın yeri söyle.
-        - Etkiyi yaz: hangi modüller ve kullanıcı işlemleri etkileniyor.
+        - Etkiyi yaz: hangi servisler ve kullanıcı işlemleri etkileniyor.
         - Somut, sıralı sonraki adımlar öner (geri alma, migration, yapılandırma, kod düzeltmesi gibi); en fazla beş adım.
         - Güveni "yüksek", "orta" ya da "düşük" olarak ver.
         - Sistemin sıraladığı birinci adayın kök neden olmadığını düşünüyorsan "disagreement" alanında nedenini yaz;
@@ -122,7 +122,7 @@ public sealed class IncidentExplainer(AnthropicClient client, ClaudeOptions opti
         sb.AppendLine($"Olay: {incident.Title}");
         sb.AppendLine($"Kategori (kural tabanlı): {incident.Category}");
         sb.AppendLine($"Başlangıç: {incident.StartedAt:u}, son hata: {incident.LastSeen:u}, toplam {incident.Occurrences} hata");
-        sb.AppendLine($"Modüller: {string.Join(", ", incident.Applications)}");
+        sb.AppendLine($"Servisler: {string.Join(", ", incident.Applications)}");
         sb.AppendLine($"Şüpheli deploy: {incident.SuspectedDeployment ?? "yok (olaydan önce sürüm değiştiren bir yayın bulunamadı)"}");
         sb.AppendLine();
 
@@ -171,7 +171,7 @@ public sealed class IncidentExplainer(AnthropicClient client, ClaudeOptions opti
         {
             summary = new { type = "string", description = "Ne oldu, iki üç cümle" },
             rootCause = new { type = "string", description = "Kök nedenin açıklaması" },
-            impact = new { type = "string", description = "Etkilenen modüller ve işlemler" },
+            impact = new { type = "string", description = "Etkilenen servisler ve işlemler" },
             nextSteps = new { type = "array", items = new { type = "string" }, description = "En fazla beş somut adım" },
             confidence = new { type = "string", @enum = new[] { "yüksek", "orta", "düşük" } },
             disagreement = new { type = new[] { "string", "null" }, description = "Birinci adaya katılmıyorsan nedeni, yoksa null" }

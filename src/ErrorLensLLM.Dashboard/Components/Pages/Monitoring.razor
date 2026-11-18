@@ -39,12 +39,12 @@ else
     <section class="card flush">
         <div class="card-head">
             <h2>Canlı anomali skoru</h2>
-            <span class="muted small">her modülün log akışı 10 sn'lik kovalarda skorlanır · çubuk: DeepLog'un beklemediği olay oranı · kesikli çizgi: eşik</span>
+            <span class="muted small">her servisin log akışı 10 sn'lik kovalarda skorlanır · çubuk: DeepLog'un beklemediği olay oranı · kesikli çizgi: eşik</span>
         </div>
         @if (_models.Count == 0)
         {
             <div class="empty">
-                Henüz eğitilmiş model yok. Collector her modül için son 10 dakikanın hatasız kovalarından (en az 18 kova, 200 log) model eğitir;
+                Henüz eğitilmiş model yok. Collector her servis için son 10 dakikanın hatasız kovalarından (en az 18 kova, 200 log) model eğitir;
                 demo başladıktan birkaç dakika sonra skorlar burada görünür.
             </div>
         }
@@ -54,7 +54,7 @@ else
                 <table class="list">
                     <thead>
                         <tr>
-                            <th>Modül</th>
+                            <th>Servis</th>
                             <th style="width:40%">DeepLog oranı (son @_range.Label)</th>
                             <th class="num">Anomalili kova</th>
                             <th class="hide-narrow">Son anomali</th>
@@ -96,7 +96,7 @@ else
                     <thead>
                         <tr>
                             <th>Kova</th>
-                            <th>Modül</th>
+                            <th>Servis</th>
                             <th>Yakalayan</th>
                             <th class="num">Beklenmeyen</th>
                             <th>Eğitimde görülmemiş şablonlar</th>
@@ -150,10 +150,10 @@ else
     </section>
 
     <section class="card flush">
-        <h2>Modüller</h2>
+        <h2>Servisler</h2>
         @if (_modules.Count == 0)
         {
-            <div class="empty">Bu aralıkta log gönderen modül yok.</div>
+            <div class="empty">Bu aralıkta log gönderen servis yok.</div>
         }
         else
         {
@@ -161,7 +161,7 @@ else
                 <table class="list">
                     <thead>
                         <tr>
-                            <th>Modül</th>
+                            <th>Servis</th>
                             <th class="num">Log</th>
                             <th class="num">Uyarı</th>
                             <th class="num">Hata</th>
@@ -205,7 +205,7 @@ else
                     <thead>
                         <tr>
                             <th>Şablon</th>
-                            <th class="hide-narrow">Modüller</th>
+                            <th class="hide-narrow">Servisler</th>
                             <th class="num">Log</th>
                             <th class="num">Hata</th>
                             <th class="hide-narrow">İlk görülme</th>
@@ -250,8 +250,8 @@ else
         </div>
         <div class="filters" style="padding:0 18px">
             <input type="search" placeholder="Mesaj, trace id ya da #log id" aria-label="Mesajda, trace id ya da log id ile ara" @bind="_search" @bind:after="ReloadAsync" />
-            <select aria-label="Modül" @bind="_module" @bind:after="ReloadAsync">
-                <option value="">Tüm modüller</option>
+            <select aria-label="Servis" @bind="_module" @bind:after="ReloadAsync">
+                <option value="">Tüm servisler</option>
                 @foreach (var module in _modules)
                 {
                     <option value="@module.Name">@module.Name</option>
@@ -278,7 +278,7 @@ else
                         <tr>
                             <th>Zaman</th>
                             <th>Seviye</th>
-                            <th>Modül</th>
+                            <th>Servis</th>
                             <th>Mesaj</th>
                         </tr>
                     </thead>

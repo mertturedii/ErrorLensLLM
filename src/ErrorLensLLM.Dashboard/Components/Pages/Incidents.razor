@@ -27,8 +27,8 @@
             <option value="@category">@DashboardFormat.Category(category)</option>
         }
     </select>
-    <select aria-label="Modül" @bind="_module">
-        <option value="">Tüm modüller</option>
+    <select aria-label="Servis" @bind="_module">
+        <option value="">Tüm servisler</option>
         @foreach (var module in Colors.Sort(_incidents.SelectMany(i => i.Applications)))
         {
             <option value="@module">@module</option>

@@ -8,7 +8,7 @@
 <div class="page-head">
     <div>
         <h1>Genel Bakış</h1>
-        <div class="sub">Modüllerin durumu, açık olaylar ve son yayınlar</div>
+        <div class="sub">Servislerin durumu, açık olaylar ve son yayınlar</div>
     </div>
     <RangeTabs Value="_range" ValueChanged="SelectAsync" />
 </div>
@@ -45,10 +45,10 @@ else
         </div>
     }
 
-    <h2>Modüller</h2>
+    <h2>Servisler</h2>
     @if (_modules.Count == 0)
     {
-        <div class="card empty">Henüz kendini bildiren bir modül yok.</div>
+        <div class="card empty">Henüz kendini bildiren bir servis yok.</div>
     }
     else
     {
@@ -95,11 +95,11 @@ else
 
     <section class="card">
         <div class="card-head">
-            <h2>Modül bazında hatalar</h2>
+            <h2>Servis bazında hatalar</h2>
             <a href="izleme" class="small">Log izleme →</a>
         </div>
         <StackedBars Points="_errorPoints" Bucket="_bucket" From="_from" To="_to" Series="_series" Color="Colors.Of"
-                     Deployments="_releases" Label="Modül bazında zaman içindeki hata sayısı"
+                     Deployments="_releases" Label="Servis bazında zaman içindeki hata sayısı"
                      EmptyText="@($"Son {_range.Label} içinde hata yok.")" />
     </section>
 

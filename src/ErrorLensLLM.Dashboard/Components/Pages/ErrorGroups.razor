@@ -15,8 +15,8 @@
 
 <div class="filters">
     <input type="search" placeholder="Tür, mesaj veya kod konumunda ara" aria-label="Hata gruplarında ara" @bind="_search" @bind:event="oninput" />
-    <select aria-label="Modül" @bind="_module">
-        <option value="">Tüm modüller</option>
+    <select aria-label="Servis" @bind="_module">
+        <option value="">Tüm servisler</option>
         @foreach (var module in Colors.Sort(_groups.SelectMany(g => g.Applications)))
         {
             <option value="@module">@module</option>
@@ -55,7 +55,7 @@
                     <tr>
                         <th>Hata</th>
                         <th class="hide-narrow">Kategori</th>
-                        <th>Modüller</th>
+                        <th>Servisler</th>
                         <th class="num">Sayı</th>
                         <th class="hide-narrow">Son görülme</th>
                         <th class="hide-narrow">Olay</th>
