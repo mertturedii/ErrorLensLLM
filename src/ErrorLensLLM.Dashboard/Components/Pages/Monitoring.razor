@@ -1,7 +1,6 @@
 @page "/izleme"
 @inherits RefreshingPage
 @inject PostgresDashboardStore Store
-@inject PostgresAnomalyStore Anomalies
 @inject DashboardSession Session
 
 <PageTitle>Log İzleme · ErrorLensLLM</PageTitle>
@@ -9,7 +8,7 @@
 <div class="page-head">
     <div>
         <h1>Log İzleme</h1>
-        <div class="sub">Yalnız hatalar değil, toplanan tüm loglar: canlı anomali skoru, hacim, hata oranı ve log şablonları</div>
+        <div class="sub">Yalnız hatalar değil, toplanan tüm loglar: hacim, hata oranı, log şablonları ve canlı log akışı</div>
     </div>
     <RangeTabs Value="_range" ValueChanged="SelectAsync" />
 </div>
@@ -31,117 +30,12 @@ else
         <Stat Label="Aktif şablon" Value="@DashboardFormat.Number(_templates.Count)" Hint="bu aralıkta log üreten" />
         <Stat Label="Yeni şablon" Value="@DashboardFormat.Number(_templates.Count(IsNew))" Hint="ilk kez bu aralıkta görüldü"
               Tone="@(_templates.Any(IsNew) ? "warning" : null)" />
-        <Stat Label="Anomalili kova" Value="@DashboardFormat.Number(_anomalyPoints.Sum(p => (long)p.Anomalous))"
-              Hint="@($"{DashboardFormat.Number(_anomalyPoints.Sum(p => (long)p.Scored))} kova skorlandı")"
-              Tone="@(_anomalyPoints.Any(p => p.Anomalous > 0) ? "critical" : null)" />
     </div>
 
-    <section class="card flush">
-        <div class="card-head">
-            <h2>Canlı anomali skoru</h2>
-            <span class="muted small">her servisin log akışı 10 sn'lik kovalarda skorlanır · çubuk: DeepLog'un beklemediği olay oranı · kesikli çizgi: eşik</span>
-        </div>
-        @if (_models.Count == 0)
-        {
-            <div class="empty">
-                Henüz eğitilmiş model yok. Collector her servis için son 10 dakikanın hatasız kovalarından (en az 18 kova, 200 log) model eğitir;
-                demo başladıktan birkaç dakika sonra skorlar burada görünür.
-            </div>
-        }
-        else
-        {
-            <div class="scroll-x">
-                <table class="list">
-                    <thead>
-                        <tr>
-                            <th>Servis</th>
-                            <th style="width:40%">DeepLog oranı (son @_range.Label)</th>
-                            <th class="num">Anomalili kova</th>
-                            <th class="hide-narrow">Son anomali</th>
-                            <th class="hide-narrow">Model</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var model in _models)
-                        {
-                            var points = _anomalyPoints.Where(p => p.Application == model.Application).ToList();
-                            var last = _recentAnomalies.FirstOrDefault(a => a.Application == model.Application);
-                            <tr @key="model.Application">
-                                <td><ModuleChip Name="@model.Application" /></td>
-                                <td>
-                                    <AnomalyStrip Slots="SlotsOf(points)" Threshold="model.DeepLogThreshold" Color="@Colors.Of(model.Application)"
-                                                  Tooltip="AnomalyTooltip" Label="@($"{model.Application} DeepLog anomali oranının seyri")" />
-                                </td>
-                                <td class="num">@DashboardFormat.Number(points.Sum(p => (long)p.Anomalous)) / @DashboardFormat.Number(points.Sum(p => (long)p.Scored))</td>
-                                <td class="hide-narrow nowrap">@(last is null ? "—" : Format.Stamp(last.BucketStart))</td>
-                                <td class="hide-narrow small">
-                                    @Format.Stamp(model.TrainedAt) · @model.Buckets kova, @DashboardFormat.Number(model.Events) log, @model.Templates şablon
-                                    <div class="muted">top-g @model.TopG · DeepLog eşiği @Percent(model.DeepLogThreshold) · IF eşiği @model.ForestThreshold.ToString("0.000")
-                                        · hacim @model.MeanEvents.ToString("0.#") ± @model.StdEvents.ToString("0.#")</div>
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
-        }
-    </section>
-
-    @if (_recentAnomalies.Count > 0)
-    {
-        <section class="card flush">
-            <h2>Son anomaliler</h2>
-            <div class="scroll-x scroll-y">
-                <table class="list">
-                    <thead>
-                        <tr>
-                            <th>Kova</th>
-                            <th>Servis</th>
-                            <th>Yakalayan</th>
-                            <th class="num">Beklenmeyen</th>
-                            <th>Eğitimde görülmemiş şablonlar</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var a in _recentAnomalies)
-                        {
-                            <tr>
-                                <td class="nowrap">@Format.Stamp(a.BucketStart)</td>
-                                <td><ModuleChip Name="@a.Application" /></td>
-                                <td>
-                                    <div class="detectors">
-                                        @if (a.DeepLog)
-                                        {
-                                            <span class="badge bad"><span class="dot"></span>DeepLog @Percent(a.DeepLogShare)</span>
-                                        }
-                                        @if (a.Forest)
-                                        {
-                                            <span class="badge bad"><span class="dot"></span>Isolation Forest @a.ForestScore.ToString("0.00")</span>
-                                        }
-                                        @if (a.Volume)
-                                        {
-                                            <span class="badge warn"><span class="dot"></span>hacim: @a.Events log</span>
-                                        }
-                                    </div>
-                                </td>
-                                <td class="num">@a.AnomalousEvents / @a.Events</td>
-                                <td>
-                                    @if (a.UnseenTemplates.Count == 0)
-                                    {
-                                        <span class="muted">—</span>
-                                    }
-                                    @foreach (var text in a.UnseenTemplates)
-                                    {
-                                        <div class="mono small">@text</div>
-                                    }
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
-        </section>
-    }
+    <a class="card link-card" href="anomaliler">
+        <strong>Anomali tespiti</strong>
+        <span class="small secondary">Servislerin DeepLog, Isolation Forest ve hacim skorları, eşikleri ve anomalili kovalar ayrı ekranda →</span>
+    </a>
 
     <section class="card">
         <h2>Seviye bazında log hacmi</h2>
@@ -319,8 +213,7 @@ else
     </section>
 
     <p class="foot-note">
-        Anomali modelleri hatasız kovaların normal olduğunu varsayarak eğitilir ve 30 dakikada bir yenilenir; hata satırı üretmeyen
-        bir bozulma bir sonraki eğitimde normal sayılabilir. Yöntemlerin HDFS ve BGL üzerindeki karşılaştırması: <code>docs/experiments</code>.
+        Anomali skorları ve modeller <a href="anomaliler">Anomali Tespiti</a> ekranında.
         Son güncelleme @(Updated is { } u ? Format.Time(u) : "—")
         @if (RefreshError is not null)
         {
@@ -351,9 +244,6 @@ else
     private IReadOnlyList<ModuleStats> _modules = [];
     private IReadOnlyList<TemplateView> _templates = [];
     private IReadOnlyList<LogEventView> _logs = [];
-    private IReadOnlyList<AnomalyModelRow> _models = [];
-    private IReadOnlyList<AnomalyPoint> _anomalyPoints = [];
-    private IReadOnlyList<AnomalyEvent> _recentAnomalies = [];
     private string _search = "";
     private string _module = "";
     private string _level = "";
@@ -371,9 +261,6 @@ else
         _logs = await Store.RecentLogsAsync(
             _from, _module.Length == 0 ? null : _module, _level.Length == 0 ? null : _level, _search, 50, Stopping);
 
-        _models = await Anomalies.ModelsAsync(Stopping);
-        _anomalyPoints = await Store.AnomalySeriesAsync(_from, _to, _bucket, Stopping);
-        _recentAnomalies = await Store.RecentAnomaliesAsync(_from, 20, Stopping);
 
         _levelPoints = _volume.Select(p => new TimelinePoint(p.Bucket, SeriesOf(p.Level), p.Count)).ToList();
         // Errors sit on the baseline, where their height is easiest to compare from bar to bar
@@ -399,20 +286,6 @@ else
     }
 
     private bool IsNew(TemplateView template) => template.FirstSeen >= _from;
-
-    private IReadOnlyList<AnomalyPoint?> SlotsOf(IReadOnlyList<AnomalyPoint> points)
-    {
-        var slots = new AnomalyPoint?[Math.Max((int)Math.Ceiling(_range!.Span / _bucket), 1)];
-        foreach (var point in points)
-            slots[Math.Clamp((int)((point.Bucket - _from) / _bucket), 0, slots.Length - 1)] = point;
-        return slots;
-    }
-
-    private string AnomalyTooltip(AnomalyPoint p) =>
-        $"{Format.Stamp(p.Bucket)} · en yüksek DeepLog oranı {Percent(p.MaxShare)} (eşik {Percent(p.Threshold)}) · " +
-        (p.Anomalous > 0 ? $"{p.Anomalous} / {p.Scored} kova anomali" : $"{p.Scored} kova, anomali yok");
-
-    private static string Percent(double value) => "%" + (value * 100).ToString("0.#", System.Globalization.CultureInfo.GetCultureInfo("tr-TR"));
 
     private static string SeriesOf(string level) => level switch
     {

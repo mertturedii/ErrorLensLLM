@@ -1,0 +1,372 @@
+@page "/anomaliler"
+@inherits RefreshingPage
+@inject PostgresDashboardStore Store
+@inject PostgresAnomalyStore AnomalyStore
+@inject DashboardSession Session
+
+<PageTitle>Anomali Tespiti · ErrorLensLLM</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>Anomali Tespiti</h1>
+        <div class="sub">Exception olmasa da log akışındaki tuhaflıklar: her servisin logları 10 sn'lik kovalarda üç yöntemle skorlanır</div>
+    </div>
+    <RangeTabs Value="_range" ValueChanged="SelectAsync" />
+</div>
+
+@if (_range is null)
+{
+    <div class="card empty">Yükleniyor…</div>
+}
+else
+{
+    var scored = _points.Sum(p => (long)p.Scored);
+    var flagged = _points.Sum(p => (long)p.Anomalous);
+
+    <div class="stats">
+        <Stat Label="Skorlanan kova" Value="@DashboardFormat.Number(scored)" Hint="@($"son {_range.Label}, 10 sn'lik")" />
+        <Stat Label="Anomalili kova" Value="@DashboardFormat.Number(flagged)" Hint="@DashboardFormat.Rate(flagged, scored)"
+              Tone="@(flagged > 0 ? "critical" : null)" />
+        <Stat Label="DeepLog" Value="@DashboardFormat.Number(_points.Sum(p => (long)p.DeepLogHits))" Hint="log sırası alışılmadık" />
+        <Stat Label="Isolation Forest" Value="@DashboardFormat.Number(_points.Sum(p => (long)p.ForestHits))" Hint="log karışımı alışılmadık" />
+        <Stat Label="Hacim" Value="@DashboardFormat.Number(_points.Sum(p => (long)p.VolumeHits))" Hint="log sayısı alışılmadık" />
+        <Stat Label="Model" Value="@_models.Count.ToString()" Hint="eğitilmiş servis" />
+    </div>
+
+    <section class="card">
+        <h2>Nasıl okunur</h2>
+        <div class="measure">
+            <div><strong>DeepLog</strong><div class="small secondary">LSTM, son 10 logdan bir sonrakini tahmin eder. Çubuk: kovadaki logların modelin ilk g tahmininde olmayan payı. Kesikli çizgi: eşik.</div></div>
+            <div><strong>Isolation Forest</strong><div class="small secondary">Kovadaki şablon sayımlarının ne kadar kolay yalıtıldığı (0–1). Çubuk: skor. Kesikli çizgi: eğitimdeki en yüksek skor.</div></div>
+            <div><strong>Hacim</strong><div class="small secondary">Kovadaki log sayısı. Gri bant: normal aralık, ortalama ± max(4σ, ortalamanın yarısı). Bandın dışı anomalidir.</div></div>
+        </div>
+        <p class="small muted">Kırmızı çubuk, o aralıkta dedektörün en az bir kovayı işaretlediğini gösterir. Bir kova, üç dedektörden biri alarm verirse anomalili sayılır.</p>
+    </section>
+
+    @if (_models.Count == 0)
+    {
+        <div class="card empty">
+            Henüz eğitilmiş model yok. Collector her servis için son 10 dakikanın hatasız kovalarından (en az 18 kova, 200 log) model eğitir;
+            demo başladıktan birkaç dakika sonra skorlar burada görünür.
+        </div>
+    }
+
+    @foreach (var model in _models)
+    {
+        var points = Slots(model.Application);
+        var band = VolumeBand(model);
+        var flaggedHere = _points.Where(p => p.Application == model.Application).Sum(p => (long)p.Anomalous);
+        var scoredHere = _points.Where(p => p.Application == model.Application).Sum(p => (long)p.Scored);
+
+        <section class="card" @key="model.Application">
+            <div class="service-head">
+                <div style="display:flex;gap:10px;align-items:center">
+                    <ModuleChip Name="@model.Application" />
+                    <span class="small secondary">@DashboardFormat.Number(flaggedHere) / @DashboardFormat.Number(scoredHere) kova anomalili</span>
+                </div>
+                <button class="secondary small" @onclick="() => Filter(model.Application)">Bu servisin anomalileri ↓</button>
+            </div>
+
+            <dl class="model-facts small" style="margin:10px 0 0">
+                <div><dt>Eğitim</dt><dd>@Format.Stamp(model.TrainedAt)</dd></div>
+                <div><dt>Eğitim aralığı</dt><dd>@Format.Time(model.TrainedFrom) – @Format.Time(model.TrainedTo)</dd></div>
+                <div><dt>Veri</dt><dd>@model.Buckets kova · @DashboardFormat.Number(model.Events) log · @model.Templates şablon</dd></div>
+                <div><dt>top-g</dt><dd>@model.TopG</dd></div>
+                <div><dt>Ayrılmış veride beklenmeyen</dt><dd>@Percent(model.HoldoutEventRate)</dd></div>
+                <div><dt>DeepLog eşiği</dt><dd>@Percent(model.DeepLogThreshold)</dd></div>
+                <div><dt>IF eşiği</dt><dd>@model.ForestThreshold.ToString("0.000")</dd></div>
+                <div><dt>Hacim</dt><dd>@model.MeanEvents.ToString("0.#") ± @model.StdEvents.ToString("0.#") log · normal aralık @band.Low.ToString("0.#")–@band.High.ToString("0.#")</dd></div>
+            </dl>
+
+            <div class="detector-grid">
+                <DetectorChart Title="DeepLog" Caption="beklenmeyen log payı"
+                               Values="@points.Select(p => p is null ? (double?)null : p.DeepLogMax).ToList()"
+                               Thresholds="@points.Select(p => p is null ? (double?)null : p.DeepLogThreshold).ToList()"
+                               Flags="@points.Select(p => p?.DeepLogHits > 0).ToList()"
+                               Tooltips="@points.Select(p => p is null ? "" : $"{Format.Stamp(p.Bucket)} · en yüksek pay {Percent(p.DeepLogMax)} (eşik {Percent(p.DeepLogThreshold)}) · {p.DeepLogHits}/{p.Scored} kova alarm").ToList()"
+                               Color="@Colors.Of(model.Application)" />
+                <DetectorChart Title="Isolation Forest" Caption="yalıtım skoru"
+                               Values="@points.Select(p => p is null ? (double?)null : p.ForestMax).ToList()"
+                               Thresholds="@points.Select(p => p is null ? (double?)null : p.ForestThreshold).ToList()"
+                               Flags="@points.Select(p => p?.ForestHits > 0).ToList()"
+                               Tooltips="@points.Select(p => p is null ? "" : $"{Format.Stamp(p.Bucket)} · en yüksek skor {p.ForestMax:0.000} (eşik {p.ForestThreshold:0.000}) · {p.ForestHits}/{p.Scored} kova alarm").ToList()"
+                               Color="@Colors.Of(model.Application)" Scale="1" />
+                <DetectorChart Title="Hacim" Caption="kova başına log"
+                               Values="@points.Select(p => p is null ? (double?)null : p.EventsAvg).ToList()"
+                               Band="band"
+                               Flags="@points.Select(p => p?.VolumeHits > 0).ToList()"
+                               Tooltips="@points.Select(p => p is null ? "" : $"{Format.Stamp(p.Bucket)} · ortalama {p.EventsAvg:0.#} log (en az {p.EventsMin}, en çok {p.EventsMax}) · normal {band.Low:0.#}–{band.High:0.#} · {p.VolumeHits}/{p.Scored} kova alarm").ToList()"
+                               Color="@Colors.Of(model.Application)" />
+            </div>
+        </section>
+    }
+
+    <section class="card flush" id="anomaliler">
+        <div class="card-head">
+            <h2>Anomalili kovalar</h2>
+        </div>
+        <div class="filters" style="padding:0 18px">
+            <select aria-label="Servis" @bind="_service" @bind:after="ReloadAsync">
+                <option value="">Tüm servisler</option>
+                @foreach (var model in _models)
+                {
+                    <option value="@model.Application">@model.Application</option>
+                }
+            </select>
+            <select aria-label="Dedektör" @bind="_detector" @bind:after="ReloadAsync">
+                <option value="">Tüm dedektörler</option>
+                <option value="deeplog">DeepLog</option>
+                <option value="forest">Isolation Forest</option>
+                <option value="volume">Hacim</option>
+            </select>
+            <span class="count">son @_anomalies.Count kayıt</span>
+        </div>
+        @if (_anomalies.Count == 0)
+        {
+            <div class="empty">Bu aralıkta ve bu filtrelerle anomalili kova yok.</div>
+        }
+        else
+        {
+            <div class="scroll-x">
+                <table class="list">
+                    <thead>
+                        <tr>
+                            <th>Kova</th>
+                            <th>Servis</th>
+                            <th>Yakalayan</th>
+                            <th class="num">Beklenmeyen</th>
+                            <th class="hide-narrow">Eğitimde görülmemiş şablonlar</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var a in _anomalies)
+                        {
+                            var key = Key(a);
+                            <tr class="expandable @(_open.Contains(key) ? "open" : "")" @onclick="() => ToggleAsync(a)" title="Ayrıntılar için tıkla">
+                                <td class="nowrap">@Format.Stamp(a.BucketStart)</td>
+                                <td><ModuleChip Name="@a.Application" /></td>
+                                <td>
+                                    <div class="detectors">
+                                        @if (a.DeepLog)
+                                        {
+                                            <span class="badge bad"><span class="dot"></span>DeepLog @Percent(a.DeepLogShare)</span>
+                                        }
+                                        @if (a.Forest)
+                                        {
+                                            <span class="badge bad"><span class="dot"></span>Isolation Forest @a.ForestScore.ToString("0.00")</span>
+                                        }
+                                        @if (a.Volume)
+                                        {
+                                            <span class="badge warn"><span class="dot"></span>hacim: @a.Events log</span>
+                                        }
+                                    </div>
+                                </td>
+                                <td class="num">@a.AnomalousEvents / @a.Events</td>
+                                <td class="hide-narrow">
+                                    @if (a.UnseenTemplates.Count == 0)
+                                    {
+                                        <span class="muted">—</span>
+                                    }
+                                    @foreach (var text in a.UnseenTemplates.Take(3))
+                                    {
+                                        <div class="mono small">@text</div>
+                                    }
+                                    @if (a.UnseenTemplates.Count > 3)
+                                    {
+                                        <div class="muted small">+@(a.UnseenTemplates.Count - 3) şablon</div>
+                                    }
+                                </td>
+                            </tr>
+                            @if (_open.Contains(key))
+                            {
+                                <tr class="log-detail">
+                                    <td colspan="5">
+                                        @{ var model = _models.FirstOrDefault(m => m.Application == a.Application); }
+                                        <div class="measure">
+                                            <div class="@(a.DeepLog ? "fired" : "")">
+                                                <div class="muted small">DeepLog · beklenmeyen log payı</div>
+                                                <div class="big">@Percent(a.DeepLogShare)</div>
+                                                <div class="small secondary">eşik @Percent(a.DeepLogThreshold) · @a.AnomalousEvents / @a.Events log beklenmedik @(a.DeepLog ? "→ alarm" : "")</div>
+                                            </div>
+                                            <div class="@(a.Forest ? "fired" : "")">
+                                                <div class="muted small">Isolation Forest · yalıtım skoru</div>
+                                                <div class="big">@a.ForestScore.ToString("0.000")</div>
+                                                <div class="small secondary">eşik @a.ForestThreshold.ToString("0.000") @(a.Forest ? "→ alarm" : "")</div>
+                                            </div>
+                                            <div class="@(a.Volume ? "fired" : "")">
+                                                <div class="muted small">Hacim · kovadaki log</div>
+                                                <div class="big">@a.Events</div>
+                                                <div class="small secondary">
+                                                    @if (model is not null)
+                                                    {
+                                                        var b = VolumeBand(model);
+                                                        <span>normal aralık @b.Low.ToString("0.#")–@b.High.ToString("0.#") (şu anki model) @(a.Volume ? "→ alarm" : "")</span>
+                                                    }
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        @if (a.UnseenTemplates.Count > 0)
+                                        {
+                                            <div class="log-section">
+                                                <div class="muted small">Eğitimde görülmemiş şablonlar</div>
+                                                <pre class="stack">@string.Join("\n", a.UnseenTemplates)</pre>
+                                            </div>
+                                        }
+
+                                        @if (_incidents.TryGetValue(key, out var incidents) && incidents.Count > 0)
+                                        {
+                                            <div class="log-section">
+                                                <div class="muted small">Aynı sırada bu serviste açık olay</div>
+                                                @foreach (var i in incidents)
+                                                {
+                                                    <div><a href="olaylar/@i.Id">@i.Title</a> <span class="muted small">· @Format.Stamp(i.StartedAt)</span></div>
+                                                }
+                                            </div>
+                                        }
+                                        else if (_incidents.ContainsKey(key))
+                                        {
+                                            <div class="log-section small muted">Bu sırada serviste açık bir olay yok: anomali exception'a dönüşmemiş bir davranış değişikliği olabilir.</div>
+                                        }
+
+                                        <div class="log-section">
+                                            <div class="muted small">Kovadaki loglar (@Format.TimeWithMs(a.BucketStart) – +10 sn)</div>
+                                            @if (_bucketLogs.TryGetValue(key, out var logs))
+                                            {
+                                                <table class="list">
+                                                    <tbody>
+                                                        @foreach (var e in logs)
+                                                        {
+                                                            <tr class="expandable @(_openLogs.Contains(e.Id) ? "open" : "")" @onclick="() => ToggleLog(e.Id)" @onclick:stopPropagation="true">
+                                                                <td class="num left nowrap">@Format.TimeWithMs(e.Timestamp)</td>
+                                                                <td><span class="badge @LevelBadge(e.Level)"><span class="dot"></span>@DashboardFormat.Level(e.Level)</span></td>
+                                                                <td>
+                                                                    @e.Message
+                                                                    @if (e.ExceptionType is not null)
+                                                                    {
+                                                                        <div class="secondary small">@DashboardFormat.ShortType(e.ExceptionType) · @e.ExceptionMessage</div>
+                                                                    }
+                                                                </td>
+                                                            </tr>
+                                                            @if (_openLogs.Contains(e.Id))
+                                                            {
+                                                                <LogDetailRow Id="e.Id" Columns="3" />
+                                                            }
+                                                        }
+                                                    </tbody>
+                                                </table>
+                                            }
+                                            else
+                                            {
+                                                <span class="muted small">Yükleniyor…</span>
+                                            }
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+
+    <p class="foot-note">
+        Modeller her servis için son 10 dakikanın hatasız kovalarıyla eğitilir ve 30 dakikada bir yenilenir; eşikler bu normal veriden seçilir.
+        Hata satırı üretmeyen uzun bir bozulma bir sonraki eğitimde normal sayılabilir. Yöntemlerin HDFS ve BGL üzerindeki karşılaştırması:
+        <code>docs/experiments</code>. Son güncelleme @(Updated is { } u ? Format.Time(u) : "—")
+        @if (RefreshError is not null)
+        {
+            <span class="warn"> · yenileme başarısız, eski veri gösteriliyor</span>
+        }
+    </p>
+}
+
+@code {
+    private TimeRange? _range;
+    private DateTimeOffset _from, _to;
+    private TimeSpan _bucket;
+    private IReadOnlyList<AnomalyModelRow> _models = [];
+    private IReadOnlyList<DetectorPoint> _points = [];
+    private IReadOnlyList<AnomalyDetail> _anomalies = [];
+    private string _service = "";
+    private string _detector = "";
+
+    private readonly HashSet<string> _open = [];
+    private readonly HashSet<long> _openLogs = [];
+    private readonly Dictionary<string, IReadOnlyList<LogEventView>> _bucketLogs = [];
+    private readonly Dictionary<string, IReadOnlyList<IncidentLink>> _incidents = [];
+
+    protected override async Task LoadAsync()
+    {
+        _range ??= Session.Range ??= TimeRange.Fit(await Store.LatestLogAsync(Stopping));
+        _bucket = PostgresDashboardStore.BucketFor(_range.Span);
+        _to = DateTimeOffset.UtcNow;
+        _from = _to - _range.Span;
+
+        _models = await AnomalyStore.ModelsAsync(Stopping);
+        _points = await Store.DetectorSeriesAsync(_from, _to, _bucket, Stopping);
+        _anomalies = await Store.AnomaliesAsync(_from, Empty(_service), Empty(_detector), 100, Stopping);
+    }
+
+    private async Task SelectAsync(TimeRange range)
+    {
+        _range = Session.Range = range;
+        await ReloadAsync();
+    }
+
+    private async Task Filter(string service)
+    {
+        _service = service;
+        await ReloadAsync();
+    }
+
+    private async Task ToggleAsync(AnomalyDetail a)
+    {
+        var key = Key(a);
+        if (_open.Remove(key))
+            return;
+        _open.Add(key);
+        // A flagged bucket does not change once scored, so its logs and incidents are read once
+        if (!_bucketLogs.ContainsKey(key))
+        {
+            _incidents[key] = await Store.IncidentsAroundAsync(a.Application, a.BucketStart, Stopping);
+            _bucketLogs[key] = await Store.BucketLogsAsync(a.Application, a.BucketStart, ct: Stopping);
+        }
+    }
+
+    private void ToggleLog(long id)
+    {
+        if (!_openLogs.Remove(id))
+            _openLogs.Add(id);
+    }
+
+    private IReadOnlyList<DetectorPoint?> Slots(string application)
+    {
+        var slots = new DetectorPoint?[Math.Max((int)Math.Ceiling(_range!.Span / _bucket), 1)];
+        foreach (var point in _points.Where(p => p.Application == application))
+            slots[Math.Clamp((int)((point.Bucket - _from) / _bucket), 0, slots.Length - 1)] = point;
+        return slots;
+    }
+
+    /// <summary>The volume rule's normal range: mean ± max(4σ, half the mean), as in StreamAnomalyModel.</summary>
+    private static (double Low, double High) VolumeBand(AnomalyModelRow m)
+    {
+        var width = Math.Max(4 * m.StdEvents, 0.5 * m.MeanEvents);
+        return (Math.Max(m.MeanEvents - width, 0), m.MeanEvents + width);
+    }
+
+    private static string Key(AnomalyDetail a) => $"{a.Application}|{a.BucketStart.UtcTicks}";
+
+    private static string? Empty(string value) => value.Length == 0 ? null : value;
+
+    private static string Percent(double value) => "%" + (value * 100).ToString("0.#", System.Globalization.CultureInfo.GetCultureInfo("tr-TR"));
+
+    private static string LevelBadge(string level) => level switch
+    {
+        "Error" or "Fatal" => "bad",
+        "Warning" => "warn",
+        "Information" => "accent",
+        _ => ""
+    };
+}

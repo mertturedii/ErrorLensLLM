@@ -512,3 +512,29 @@ tr.log-detail > td { background: var(--surface-2); padding: 4px 14px 14px; }
 .trace-step.failed { outline: 1px solid var(--critical); }
 tr.row-error td:first-child { box-shadow: inset 3px 0 0 var(--critical); }
 a code { color: inherit; }
+
+/* ---------- Anomaly page ---------- */
+
+.detector-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 12px; }
+@media (max-width: 900px) { .detector-grid { grid-template-columns: 1fr; } }
+.detector-chart svg { display: block; width: 100%; height: 60px; }
+.detector-chart rect { fill: currentColor; opacity: .5; }
+.detector-chart rect.flag { fill: var(--critical); opacity: 1; }
+.detector-chart rect.band { fill: var(--series-other); opacity: .18; }
+.detector-chart rect:hover { opacity: 1; }
+.detector-chart .base { stroke: var(--grid); stroke-width: 1; }
+.detector-chart .threshold { fill: none; stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+.detector-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; margin-bottom: 4px; flex-wrap: wrap; }
+.detector-name { font-weight: 600; font-size: 13px; }
+.model-facts { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.model-facts div { display: flex; gap: 6px; }
+.model-facts dt { color: var(--text-secondary); }
+.model-facts dd { margin: 0; }
+.service-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.measure { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 6px 0 10px; }
+@media (max-width: 900px) { .measure { grid-template-columns: 1fr; } }
+.measure > div { background: var(--surface-1); border-radius: 8px; padding: 10px 12px; }
+.measure .fired { outline: 1px solid var(--critical); }
+.measure .big { font-size: 18px; font-weight: 600; }
+a.link-card { display: flex; flex-direction: column; gap: 4px; text-decoration: none; color: inherit; }
+a.link-card:hover { background: var(--surface-2); }

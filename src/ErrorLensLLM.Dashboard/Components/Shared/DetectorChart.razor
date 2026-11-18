@@ -1,0 +1,64 @@
+@* One detector of one service over time: a bar per display bucket, its threshold as a dashed line (or a band for the
+   volume rule), flagged buckets in the critical color, a tooltip on every bar. *@
+<div class="detector-chart">
+    <div class="detector-head">
+        <span class="detector-name">@Title</span>
+        @if (Caption is not null)
+        {
+            <span class="muted small">@Caption</span>
+        }
+    </div>
+    <svg viewBox="0 0 @F(Width) @F(Height)" preserveAspectRatio="none" role="img" aria-label="@Title" style="color:@Color">
+        <line x1="0" x2="@F(Width)" y1="@F(Height - 0.5)" y2="@F(Height - 0.5)" class="base" />
+        @if (Band is { } band)
+        {
+            var top = Y(Math.Min(band.High, Max));
+            var bottom = Y(Math.Max(band.Low, 0));
+            <rect x="0" y="@F(top)" width="@F(Width)" height="@F(Math.Max(bottom - top, 0))" class="band" />
+        }
+        @for (var i = 0; i < Values.Count; i++)
+        {
+            if (Values[i] is not { } value)
+                continue;
+            var y = Y(Math.Min(value, Max));
+            var height = Math.Max(Height - 1 - y, Flags[i] ? 3 : 1);
+            <rect x="@F(i * Step + 0.5)" y="@F(Height - 1 - height)" width="@F(Step - 1)" height="@F(height)" class="@(Flags[i] ? "flag" : null)">
+                <title>@Tooltips[i]</title>
+            </rect>
+        }
+        @if (Thresholds is not null)
+        {
+            var points = string.Join(" ", Enumerable.Range(0, Values.Count)
+                .Where(i => Thresholds[i] is not null)
+                .SelectMany(i => new[] { $"{F(i * Step)},{F(Y(Math.Min(Thresholds[i]!.Value, Max)))}", $"{F((i + 1) * Step)},{F(Y(Math.Min(Thresholds[i]!.Value, Max)))}" }));
+            <polyline points="@points" class="threshold" />
+        }
+    </svg>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public string? Caption { get; set; }
+    [Parameter, EditorRequired] public IReadOnlyList<double?> Values { get; set; } = [];
+    [Parameter] public IReadOnlyList<double?>? Thresholds { get; set; }
+    [Parameter] public (double Low, double High)? Band { get; set; }
+    [Parameter, EditorRequired] public IReadOnlyList<bool> Flags { get; set; } = [];
+    [Parameter, EditorRequired] public IReadOnlyList<string> Tooltips { get; set; } = [];
+    [Parameter] public string Color { get; set; } = "var(--series-1)";
+    /// <summary>Top of the scale; values above it are drawn at the top.</summary>
+    [Parameter] public double? Scale { get; set; }
+
+    private const double Step = 4, Height = 60;
+    private double Width => Math.Max(Values.Count, 1) * Step;
+
+    private double Max => Scale ?? Math.Max(1e-9, new[]
+    {
+        Values.Where(v => v is not null).Select(v => v!.Value).DefaultIfEmpty(0).Max(),
+        Thresholds?.Where(v => v is not null).Select(v => v!.Value).DefaultIfEmpty(0).Max() ?? 0,
+        Band?.High ?? 0
+    }.Max() * 1.1);
+
+    private double Y(double value) => Height - 1 - (Height - 4) * (value / Max);
+
+    private static string F(double value) => value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+}
