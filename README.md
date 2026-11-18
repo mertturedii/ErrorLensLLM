@@ -164,6 +164,8 @@ Every 10 seconds the collector correlates the errors of the last hour into incid
 - **Logged-only errors.** An `Error`/`Fatal` log without an exception is grouped by application and message template.
 - **Category.** Rule-based, from the exception type and message: database schema, database, dependency, timeout,
   code defect, validation, authorization, configuration.
+- **Closing.** An incident with no new errors for 15 minutes (`Analysis:CloseAfterMinutes`) is closed; errors after
+  that open a new incident. There is no minimum size: a single error is enough to open one.
 
 For the faulty release above, all five error groups form one incident, titled
 *"kayit 1.1.0 sonrası PostgresException — 3 modül"*. The `PostgresException` in `kayit` ranks first with a score of
@@ -219,6 +221,11 @@ Gemini is the second provider ([GeminiExplainer](src/ErrorLensLLM.AI.Claude/Gemi
 backoff. Tried on the demo's faulty `kayit 1.1.0`: Gemini named the missing `donem_id` column in `KayitService.GetirAsync`
 as the root cause, called the `not` and `odeme` HTTP 500s its consequences, agreed with the ranking (confidence
 "yüksek") and proposed a roll-back and a migration first (2671 input, 359 output tokens).
+
+Incidents that started more than an hour before the layer was switched on are not explained on their own;
+`POST /api/incidents/{id}/explain` explains one on demand (it needs the collector key when one is set). Three such
+incidents were explained this way, all correctly: the faulty release, an `odeme`/`not` connection failure while `kayit`
+was down (no suspected release), and a port conflict that kept the traffic generator from starting.
 
 ## Evaluation with fault injection
 
@@ -276,7 +283,8 @@ every 2 s.
   - the LLM explanation (summary, cause, impact, next steps, confidence, disagreement), when the layer is on;
   - a timeline of errors per module with deployment markers, and a table view;
   - every root cause candidate with its score;
-  - one request chain showing how the failure spread across modules, and the latest errors;
+  - one request chain showing how the failure spread across modules, with a link to the full request trace,
+    and the latest errors;
   - the suspected deployment (version, commit) and the feedback form, kept in view beside the rest.
 - **Error groups (`/hatalar`):** every fingerprint with its count, modules, category and the incident it belongs to;
   similar groups are clustered; the group page adds its timeline, the most similar groups, a sample stack trace and the
@@ -286,14 +294,23 @@ every 2 s.
 - **Log monitoring (`/izleme`):** the live anomaly score of each module over time against its threshold, each module's
   model (training period, top-g, thresholds), the latest flagged buckets with the detectors that fired and the unseen
   templates; then all logs, not only errors: volume by level, error rate per module, the log templates seen in the
-  window and a searchable tail.
+  window and a searchable tail. The search also takes a trace id or a log id (`#123`), which find their logs whatever
+  the time range.
+- **Log rows** on the incident, error group, monitoring and trace screens open on a click to the full event: log id,
+  time to the millisecond, level, module and environment, the release and commit it came from, host, trace and span id
+  (linking to the request trace), error group, the full message, exception type and message, the whole stack trace and
+  the structured properties. The details are read only for the opened row.
+- **Request trace (`/izler/{traceId}`):** every log of one request across modules in time order, with the milliseconds
+  since its start; the services it reached, those that failed, and where it failed first. Services are listed in the
+  order of their first log, which is not always the call order (parent span ids are not stored yet).
 - **Evaluation (`/degerlendirme`):** Top-1 and Top-3 accuracy of the suggested root cause from developer verdicts.
 - **Feedback:** developers mark the suggested root cause correct or wrong, and can pick the real one.
   Verdicts are stored with the suggestion they judged (`incident_feedback`), which makes them evaluation data for the
   correlator.
 
 Every screen refreshes every 10 s, follows the system light/dark preference (with a toggle), and collapses the side
-menu into a top strip on narrow screens.
+menu into a top strip on narrow screens. Stylesheet and script links carry a build version, so a browser does not keep
+an old one after an update.
 
 ## Repository layout
 
@@ -302,7 +319,7 @@ menu into a top strip on narrow screens.
 | `src/ErrorLensLLM.Ml` | Drain parser, Isolation Forest, DeepLog, detection metrics, live stream model | ✅ |
 | `src/ErrorLensLLM.Core` | PII masking, message normalization, fingerprinting, incident correlation, error clustering | ✅ |
 | `experiments/ErrorLensLLM.Experiments` | Reproducible experiments: HDFS, BGL, fault injection | ✅ |
-| `tests/` | Unit tests for Core and Ml | ✅ |
+| `tests/` | Unit and integration tests for Core, Ml and the collector (88) | ✅ |
 | `src/ErrorLensLLM.Serilog` | Serilog sink that sends logs to the collector | ✅ |
 | `src/ErrorLensLLM.Collector` | Ingestion API (masking, templating, fingerprinting), incident analyzer, anomaly monitor, explanations | ✅ |
 | `src/ErrorLensLLM.Dashboard` | Blazor Server dashboard: overview, incidents, error groups, deployments, log monitoring, evaluation | ✅ |
@@ -323,6 +340,8 @@ menu into a top strip on narrow screens.
 - [x] Dashboard with developer feedback
 - [x] LLM explanation layer
 - [x] Evaluation with fault injection scenarios (top-k root cause accuracy)
+- [x] Request trace screen, full log details, search by trace id and log id
+- [ ] Parent span ids, to show the real call order on the trace screen
 - [ ] LogBERT (future work)
 - [ ] Source code at the deployed commit as context for the LLM (`ErrorLensLLM.Source.Bitbucket`)
 
