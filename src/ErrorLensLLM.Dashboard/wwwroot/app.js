@@ -1,11 +1,8 @@
-// Light/dark choice: follows the system until the user picks one, then remembered in this browser
 window.errorLensTheme = {
+    // Dark is the default; the light theme is an explicit choice, remembered in this browser
     toggle() {
         const root = document.documentElement;
-        const dark = root.dataset.theme
-            ? root.dataset.theme === "dark"
-            : window.matchMedia("(prefers-color-scheme: dark)").matches;
-        root.dataset.theme = dark ? "light" : "dark";
+        root.dataset.theme = root.dataset.theme === "light" ? "dark" : "light";
         try { localStorage.setItem("errorlens-theme", root.dataset.theme); } catch { /* private window */ }
     }
 };

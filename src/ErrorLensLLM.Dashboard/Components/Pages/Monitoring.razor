@@ -179,7 +179,7 @@ else
                     <tbody>
                         @foreach (var e in _logs)
                         {
-                            <tr class="expandable @(_open.Contains(e.Id) ? "open" : "")" @onclick="() => Toggle(e.Id)" title="Ayrıntılar için tıkla">
+                            <tr class="expandable @(_open.Contains(e.Id) ? "open" : "")" @onclick="() => Toggle(e.Id)" title="Ayrıntılar için tıkla" tabindex="0" aria-expanded="@(_open.Contains(e.Id) ? "true" : "false")" @onkeydown="k => { if (Keys.Activates(k)) Toggle(e.Id); }">
                                 <td class="nowrap">@Format.Stamp(e.Timestamp)</td>
                                 <td><span class="badge @LevelBadge(e.Level)"><span class="dot"></span>@DashboardFormat.Level(e.Level)</span></td>
                                 <td><ModuleChip Name="@e.Application" /></td>

@@ -140,7 +140,7 @@ else if (_group is { } group)
                 <tbody>
                     @foreach (var e in _events)
                     {
-                        <tr class="expandable @(_open.Contains(e.Id) ? "open" : "")" @onclick="() => Toggle(e.Id)" title="Ayrıntılar için tıkla">
+                        <tr class="expandable @(_open.Contains(e.Id) ? "open" : "")" @onclick="() => Toggle(e.Id)" title="Ayrıntılar için tıkla" tabindex="0" aria-expanded="@(_open.Contains(e.Id) ? "true" : "false")" @onkeydown="k => { if (Keys.Activates(k)) Toggle(e.Id); }">
                             <td class="nowrap">@Format.DateTime(e.Timestamp)</td>
                             <td><ModuleChip Name="@e.Application" /></td>
                             <td class="secondary">@(e.ExceptionMessage ?? e.Message)</td>

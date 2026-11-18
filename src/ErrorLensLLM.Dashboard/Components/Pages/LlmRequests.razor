@@ -116,7 +116,7 @@ else
                     <tbody>
                         @foreach (var r in _requests)
                         {
-                            <tr class="expandable @(_open.Contains(r.Id) ? "open" : "")" @onclick="() => ToggleAsync(r.Id)" title="İstem ve cevap için tıkla">
+                            <tr class="expandable @(_open.Contains(r.Id) ? "open" : "")" @onclick="() => ToggleAsync(r.Id)" title="İstem ve cevap için tıkla" tabindex="0" aria-expanded="@(_open.Contains(r.Id) ? "true" : "false")" @onkeydown="async k => { if (Keys.Activates(k)) { await ToggleAsync(r.Id); } }">
                                 <td class="nowrap">@Format.Stamp(r.CreatedAt)</td>
                                 <td>@ProviderName(r.Provider)<div class="muted small"><code>@r.Model</code> · @r.Purpose</div></td>
                                 <td class="hide-narrow">

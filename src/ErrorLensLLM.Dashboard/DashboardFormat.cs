@@ -95,6 +95,7 @@ public sealed class DashboardFormat(IOptions<DashboardOptions> options)
     {
         "open" => "Açık",
         "closed" => "Kapandı",
+        "merged" => "Birleştirildi",
         _ => status
     };
 

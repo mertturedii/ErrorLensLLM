@@ -221,7 +221,7 @@ else if (_incident is { } incident)
                             <tbody>
                                 @foreach (var e in _recent)
                                 {
-                                    <tr class="expandable @(_open.Contains(e.Id) ? "open" : "")" @onclick="() => Toggle(e.Id)" title="Ayrıntılar için tıkla">
+                                    <tr class="expandable @(_open.Contains(e.Id) ? "open" : "")" @onclick="() => Toggle(e.Id)" title="Ayrıntılar için tıkla" tabindex="0" aria-expanded="@(_open.Contains(e.Id) ? "true" : "false")" @onkeydown="k => { if (Keys.Activates(k)) Toggle(e.Id); }">
                                         <td class="num left">@Format.TimeWithMs(e.Timestamp)</td>
                                         <td><ModuleChip Name="@e.Application" /></td>
                                         <td>

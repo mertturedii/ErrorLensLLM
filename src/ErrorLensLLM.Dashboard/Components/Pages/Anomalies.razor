@@ -40,7 +40,7 @@ else
             <div><strong>Isolation Forest</strong><div class="small secondary">Kovadaki şablon sayımlarının ne kadar kolay yalıtıldığı (0–1). Çubuk: skor. Kesikli çizgi: eğitimdeki en yüksek skor.</div></div>
             <div><strong>Hacim</strong><div class="small secondary">Kovadaki log sayısı. Gri bant: normal aralık, ortalama ± max(4σ, ortalamanın yarısı). Bandın dışı anomalidir.</div></div>
         </div>
-        <p class="small muted">Kırmızı çubuk, o aralıkta dedektörün en az bir kovayı işaretlediğini gösterir. Bir kova, üç dedektörden biri alarm verirse anomalili sayılır.</p>
+        <p class="small muted">Üstünde üçgen olan kırmızı çubuk, o aralıkta dedektörün en az bir kovayı işaretlediğini gösterir. Bir kova, üç dedektörden biri alarm verirse anomalili sayılır.</p>
     </section>
 
     @if (_models.Count == 0)
@@ -142,7 +142,7 @@ else
                         @foreach (var a in _anomalies)
                         {
                             var key = Key(a);
-                            <tr class="expandable @(_open.Contains(key) ? "open" : "")" @onclick="() => ToggleAsync(a)" title="Ayrıntılar için tıkla">
+                            <tr class="expandable @(_open.Contains(key) ? "open" : "")" @onclick="() => ToggleAsync(a)" title="Ayrıntılar için tıkla" tabindex="0" aria-expanded="@(_open.Contains(key) ? "true" : "false")" @onkeydown="async k => { if (Keys.Activates(k)) { await ToggleAsync(a); } }">
                                 <td class="nowrap">@Format.Stamp(a.BucketStart)</td>
                                 <td><ModuleChip Name="@a.Application" /></td>
                                 <td>
@@ -237,7 +237,7 @@ else
                                                     <tbody>
                                                         @foreach (var e in logs)
                                                         {
-                                                            <tr class="expandable @(_openLogs.Contains(e.Id) ? "open" : "")" @onclick="() => ToggleLog(e.Id)" @onclick:stopPropagation="true">
+                                                            <tr class="expandable @(_openLogs.Contains(e.Id) ? "open" : "")" @onclick="() => ToggleLog(e.Id)" @onclick:stopPropagation="true" tabindex="0" aria-expanded="@(_openLogs.Contains(e.Id) ? "true" : "false")" @onkeydown="k => { if (Keys.Activates(k)) ToggleLog(e.Id); }">
                                                                 <td class="num left nowrap">@Format.TimeWithMs(e.Timestamp)</td>
                                                                 <td><span class="badge @LevelBadge(e.Level)"><span class="dot"></span>@DashboardFormat.Level(e.Level)</span></td>
                                                                 <td>

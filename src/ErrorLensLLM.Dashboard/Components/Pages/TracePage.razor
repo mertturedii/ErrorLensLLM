@@ -99,11 +99,15 @@ else
                 <tbody>
                     @foreach (var e in _events)
                     {
-                        <tr class="expandable @(_open.Contains(e.Id) ? "open" : "") @(IsError(e) ? "row-error" : "")" @onclick="() => Toggle(e.Id)" title="Ayrıntılar için tıkla">
+                        <tr class="expandable @(_open.Contains(e.Id) ? "open" : "") @(IsError(e) ? "row-error" : "")" @onclick="() => Toggle(e.Id)" title="Ayrıntılar için tıkla" tabindex="0" aria-expanded="@(_open.Contains(e.Id) ? "true" : "false")" @onkeydown="k => { if (Keys.Activates(k)) Toggle(e.Id); }">
                             <td class="num left nowrap">@Format.TimeWithMs(e.Timestamp)</td>
                             <td class="num muted">@((e.Timestamp - first.Timestamp).TotalMilliseconds.ToString("0"))</td>
                             <td><ModuleChip Name="@e.Application" /></td>
                             <td>
+                                @if (IsError(e))
+                                {
+                                    <span class="level-tag">Hata</span>
+                                }
                                 @e.Message
                                 @if (e.ExceptionType is not null)
                                 {

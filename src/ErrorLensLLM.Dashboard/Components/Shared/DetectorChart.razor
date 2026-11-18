@@ -25,6 +25,12 @@
             <rect x="@F(i * Step + 0.5)" y="@F(Height - 1 - height)" width="@F(Step - 1)" height="@F(height)" class="@(Flags[i] ? "flag" : null)">
                 <title>@Tooltips[i]</title>
             </rect>
+            @if (Flags[i])
+            {
+                @* A shape on top of the colour, so a flag reads without telling red from blue *@
+                var cx = i * Step + Step / 2;
+                <path d="M@(F(cx - 2.2)) 0.5 L@(F(cx + 2.2)) 0.5 L@(F(cx)) 4 Z" class="marker" />
+            }
         }
         @if (Thresholds is not null)
         {
@@ -58,7 +64,8 @@
         Band?.High ?? 0
     }.Max() * 1.1);
 
-    private double Y(double value) => Height - 1 - (Height - 4) * (value / Max);
+    // The top 5 units are kept for the flag markers
+    private double Y(double value) => Height - 1 - (Height - 6) * (value / Max);
 
     private static string F(double value) => value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
 }
