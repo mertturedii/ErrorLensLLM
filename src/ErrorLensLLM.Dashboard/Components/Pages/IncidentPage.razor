@@ -73,8 +73,9 @@ else if (_incident is { } incident)
                 @if (_explanation is null)
                 {
                     <div class="callout secondary small">
-                        Bu olay için açıklama yok. LLM katmanı collector'da <code>ANTHROPIC_API_KEY</code> tanımlıyken açılır ve her yeni olayı,
-                        ilk dalgası oturduktan (30 sn) sonra bir kez açıklar; kök neden değişirse yeniden açıklar.
+                        Bu olay için açıklama yok. LLM katmanı collector'da <code>GEMINI_API_KEY</code> ya da <code>ANTHROPIC_API_KEY</code> tanımlıyken açılır
+                        ve her yeni olayı, ilk dalgası oturduktan (30 sn) sonra bir kez açıklar; kök neden değişirse yeniden açıklar.
+                        Katman açılmadan bir saatten daha önce başlayan olaylar geriye dönük açıklanmaz.
                     </div>
                 }
                 else if (_explanation.Json is null)
