@@ -53,9 +53,17 @@ public sealed class ClaudeOptions
 /// The correlator's ranking stays the decision; the model explains it and may disagree in a separate field, so that a
 /// developer sees both and the feedback form judges the ranking, not the prose.
 /// </summary>
-public sealed class IncidentExplainer(AnthropicClient client, ClaudeOptions options)
+/// <summary>An LLM that explains incidents; Claude and Gemini share the prompt, the input and the output schema.</summary>
+public interface IIncidentExplainer
 {
-    private const string SystemPrompt = """
+    string Model { get; }
+    Task<ExplanationResult> ExplainAsync(IncidentContext incident, CancellationToken ct = default);
+}
+
+public sealed class IncidentExplainer(AnthropicClient client, ClaudeOptions options) : IIncidentExplainer
+{
+    /// <summary>The instructions every provider receives.</summary>
+    public const string SystemPrompt = """
         Sen bir yazılım ekibinin olay (incident) analizi asistanısın. Bir log izleme sistemi, bir dağıtımdan (deploy) sonra
         farklı modüllerde oluşan hataları tek bir olayda topladı ve kök neden adaylarını kural tabanlı bir skorla sıraladı.
         Sana olayın verisini veriyorum: adaylar, her adayın skoru ve kanıtları, bir isteğin modüller arasında nasıl yayıldığı,
@@ -155,7 +163,8 @@ public sealed class IncidentExplainer(AnthropicClient client, ClaudeOptions opti
         return sb.ToString();
     }
 
-    private static Dictionary<string, JsonElement> Schema() => new()
+    /// <summary>JSON Schema of <see cref="IncidentExplanation"/>, the answer every provider must give.</summary>
+    public static Dictionary<string, JsonElement> Schema() => new()
     {
         ["type"] = JsonSerializer.SerializeToElement("object"),
         ["properties"] = JsonSerializer.SerializeToElement(new

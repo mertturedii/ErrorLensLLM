@@ -10,7 +10,7 @@ namespace ErrorLensLLM.Collector.Explanations;
 /// Only registered when an API key is configured; without one the dashboard says the layer is off.
 /// </summary>
 public sealed class ExplanationService(
-    IncidentExplainer explainer, PostgresExplanationStore explanations, PostgresDashboardStore incidents,
+    IIncidentExplainer explainer, PostgresExplanationStore explanations, PostgresDashboardStore incidents,
     ILogger<ExplanationService> log) : BackgroundService
 {
     /// <summary>An incident is explained this long after it was detected, when the correlator has seen its first wave.</summary>

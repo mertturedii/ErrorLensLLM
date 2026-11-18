@@ -39,14 +39,25 @@ builder.Services.AddSingleton<PostgresAnomalyStore>();
 builder.Services.AddSingleton<AnomalyMonitor>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AnomalyMonitor>());
 
-// LLM explanation layer: on only when an API key is configured (Claude:ApiKey or ANTHROPIC_API_KEY)
+// LLM explanation layer: Claude (ANTHROPIC_API_KEY or Claude:ApiKey) or Gemini (GEMINI_API_KEY or Gemini:ApiKey).
+// Explanation:Provider picks one when both keys are set; without a key the layer is off.
 var claude = builder.Configuration.GetSection(ClaudeOptions.Section).Get<ClaudeOptions>() ?? new ClaudeOptions();
 claude.ApiKey ??= Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
+var gemini = builder.Configuration.GetSection(GeminiOptions.Section).Get<GeminiOptions>() ?? new GeminiOptions();
+gemini.ApiKey ??= Environment.GetEnvironmentVariable("GEMINI_API_KEY");
+var provider = builder.Configuration["Explanation:Provider"]?.ToLowerInvariant()
+               ?? (!string.IsNullOrWhiteSpace(claude.ApiKey) ? "claude" : !string.IsNullOrWhiteSpace(gemini.ApiKey) ? "gemini" : null);
+IIncidentExplainer? explainer = provider switch
+{
+    "claude" when !string.IsNullOrWhiteSpace(claude.ApiKey) => new IncidentExplainer(new AnthropicClient { ApiKey = claude.ApiKey }, claude),
+    "gemini" when !string.IsNullOrWhiteSpace(gemini.ApiKey) => new GeminiExplainer(new HttpClient { Timeout = TimeSpan.FromMinutes(2) }, gemini),
+    _ => null
+};
 builder.Services.AddSingleton<PostgresExplanationStore>();
 builder.Services.AddSingleton<PostgresDashboardStore>();
-if (!string.IsNullOrWhiteSpace(claude.ApiKey))
+if (explainer is not null)
 {
-    builder.Services.AddSingleton(new IncidentExplainer(new AnthropicClient { ApiKey = claude.ApiKey }, claude));
+    builder.Services.AddSingleton(explainer);
     builder.Services.AddHostedService<ExplanationService>();
 }
 
@@ -56,9 +67,9 @@ await app.Services.GetRequiredService<PostgresLogStore>().EnsureSchemaAsync();
 await app.Services.GetRequiredService<PostgresIncidentStore>().EnsureSchemaAsync();
 await app.Services.GetRequiredService<PostgresAnomalyStore>().EnsureSchemaAsync();
 await app.Services.GetRequiredService<PostgresExplanationStore>().EnsureSchemaAsync();
-app.Logger.LogInformation(string.IsNullOrWhiteSpace(claude.ApiKey)
-    ? "LLM explanations are off: set ANTHROPIC_API_KEY (or Claude:ApiKey) to turn them on"
-    : "LLM explanations are on with {Model}", claude.Model);
+app.Logger.LogInformation(explainer is null
+    ? "LLM explanations are off: set ANTHROPIC_API_KEY or GEMINI_API_KEY to turn them on"
+    : "LLM explanations are on with {Model}", explainer?.Model);
 
 app.MapGet("/health", async (NpgsqlDataSource db, CancellationToken ct) =>
 {

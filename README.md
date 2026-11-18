@@ -213,6 +213,13 @@ root cause, impact, next steps, confidence, and a separate field for disagreeing
 the decision and the feedback form still judges it; the explanation helps a developer read it. A refusal is retried by a
 fallback model on the server (`fallbacks: "default"`). Without a key the layer is off and the dashboard says so.
 
+Gemini is the second provider ([GeminiExplainer](src/ErrorLensLLM.AI.Claude/GeminiExplainer.cs), default model
+`gemini-3.5-flash-lite`, key from `GEMINI_API_KEY`), with the same prompt and JSON schema; `Explanation:Provider`
+(`claude` or `gemini`) picks one, otherwise whichever key is set wins, Claude first. 429/5xx answers are retried with
+backoff. Tried on the demo's faulty `kayit 1.1.0`: Gemini named the missing `donem_id` column in `KayitService.GetirAsync`
+as the root cause, called the `not` and `odeme` HTTP 500s its consequences, agreed with the ranking (confidence
+"yüksek") and proposed a roll-back and a migration first (2671 input, 359 output tokens).
+
 ## Evaluation with fault injection
 
 `dotnet run --project experiments/ErrorLensLLM.Experiments -c Release -- faults` runs each scenario three times against a
@@ -300,7 +307,7 @@ menu into a top strip on narrow screens.
 | `src/ErrorLensLLM.Collector` | Ingestion API (masking, templating, fingerprinting), incident analyzer, anomaly monitor, explanations | ✅ |
 | `src/ErrorLensLLM.Dashboard` | Blazor Server dashboard: overview, incidents, error groups, deployments, log monitoring, evaluation | ✅ |
 | `src/ErrorLensLLM.Storage.PostgreSql` | Logs, incidents, feedback, anomaly scores, explanations | ✅ |
-| `src/ErrorLensLLM.AI.Claude` | LLM explanation of incidents | ✅ (needs an API key) |
+| `src/ErrorLensLLM.AI.Claude` | LLM explanation of incidents | ✅ Claude or Gemini (needs an API key) |
 | `src/ErrorLensLLM.Source.Bitbucket` | Fetches source code at the deployed commit for root cause context | planned |
 | `samples/ErrorLensLLM.Demo` | Demo modules with controlled fault injection | ✅ |
 
