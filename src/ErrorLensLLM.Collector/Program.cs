@@ -58,7 +58,8 @@ builder.Services.AddSingleton<PostgresDashboardStore>();
 if (explainer is not null)
 {
     builder.Services.AddSingleton(explainer);
-    builder.Services.AddHostedService<ExplanationService>();
+    builder.Services.AddSingleton<ExplanationService>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<ExplanationService>());
 }
 
 var app = builder.Build();
@@ -83,6 +84,19 @@ app.MapGet("/health", async (NpgsqlDataSource db, CancellationToken ct) =>
     {
         return Results.Json(new { status = "database unavailable" }, statusCode: StatusCodes.Status503ServiceUnavailable);
     }
+});
+
+// Explains one incident now, e.g. one that started before the layer was switched on and is therefore not explained on its own
+app.MapPost("/api/incidents/{id:guid}/explain", async (Guid id, HttpRequest request, IServiceProvider services, IOptions<CollectorOptions> options, CancellationToken ct) =>
+{
+    var config = options.Value;
+    if (!string.IsNullOrEmpty(config.ApiKey) && !KeyMatches(request.Headers["X-ErrorLens-Key"].ToString(), config.ApiKey))
+        return Results.Unauthorized();
+    if (services.GetService<ExplanationService>() is not { } explanations)
+        return Results.Json(new { error = "LLM explanations are off" }, statusCode: StatusCodes.Status409Conflict);
+
+    await explanations.ExplainAsync(id, ct);
+    return Results.Accepted();
 });
 
 app.MapPost("/api/ingest/logs", async (HttpRequest request, IngestBatch batch, IngestService ingest, IOptions<CollectorOptions> options, CancellationToken ct) =>
