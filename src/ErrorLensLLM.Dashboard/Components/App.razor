@@ -13,13 +13,13 @@
         } catch { }
     </script>
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
-    <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="app.css?v=@Version" />
     <HeadOutlet @rendermode="Interactive" />
 </head>
 
 <body>
     <Routes @rendermode="Interactive" />
-    <script src="app.js"></script>
+    <script src="app.js?v=@Version"></script>
     <script src="_framework/blazor.web.js"></script>
 </body>
 
@@ -27,5 +27,8 @@
 
 @code {
     // No prerender: a prerendered page would query everything twice and flash "loading" when the circuit takes over
+    // Changes with every build, so that a browser never keeps an old app.css or app.js after an update
+    private static readonly string Version = System.IO.File.GetLastWriteTimeUtc(typeof(App).Assembly.Location).Ticks.ToString("x");
+
     private static readonly IComponentRenderMode Interactive = new InteractiveServerRenderMode(prerender: false);
 }

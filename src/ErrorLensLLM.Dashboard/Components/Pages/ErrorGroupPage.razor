@@ -140,12 +140,16 @@ else if (_group is { } group)
                 <tbody>
                     @foreach (var e in _events)
                     {
-                        <tr>
+                        <tr class="expandable @(_open.Contains(e.Id) ? "open" : "")" @onclick="() => Toggle(e.Id)" title="Ayrıntılar için tıkla">
                             <td class="nowrap">@Format.DateTime(e.Timestamp)</td>
                             <td><ModuleChip Name="@e.Application" /></td>
                             <td class="secondary">@(e.ExceptionMessage ?? e.Message)</td>
                             <td class="hide-narrow"><code class="muted">@(e.TraceId?[..Math.Min(8, e.TraceId.Length)])</code></td>
                         </tr>
+                        @if (_open.Contains(e.Id))
+                        {
+                            <LogDetailRow Id="e.Id" Columns="4" />
+                        }
                     }
                 </tbody>
             </table>
@@ -158,6 +162,14 @@ else
 }
 
 @code {
+    private readonly HashSet<long> _open = [];
+
+    private void Toggle(long id)
+    {
+        if (!_open.Remove(id))
+            _open.Add(id);
+    }
+
     [Parameter] public string Fingerprint { get; set; } = "";
 
     private ErrorGroupView? _group;

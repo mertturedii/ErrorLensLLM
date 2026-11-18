@@ -285,7 +285,7 @@ else
                     <tbody>
                         @foreach (var e in _logs)
                         {
-                            <tr>
+                            <tr class="expandable @(_open.Contains(e.Id) ? "open" : "")" @onclick="() => Toggle(e.Id)" title="Ayrıntılar için tıkla">
                                 <td class="nowrap">@Format.Stamp(e.Timestamp)</td>
                                 <td><span class="badge @LevelBadge(e.Level)"><span class="dot"></span>@DashboardFormat.Level(e.Level)</span></td>
                                 <td><ModuleChip Name="@e.Application" /></td>
@@ -307,6 +307,10 @@ else
                                     }
                                 </td>
                             </tr>
+                            @if (_open.Contains(e.Id))
+                            {
+                                <LogDetailRow Id="e.Id" Columns="4" />
+                            }
                         }
                     </tbody>
                 </table>
@@ -326,6 +330,14 @@ else
 }
 
 @code {
+    private readonly HashSet<long> _open = [];
+
+    private void Toggle(long id)
+    {
+        if (!_open.Remove(id))
+            _open.Add(id);
+    }
+
     private sealed record ModuleStats(string Name, long Logs, long Warnings, long Errors, int[] Series);
 
     private const string ErrorSeries = "Hata", WarningSeries = "Uyarı", InfoSeries = "Bilgi", OtherSeries = "Diğer";

@@ -19,7 +19,13 @@ public sealed record TimelinePoint(DateTimeOffset Bucket, string Application, in
 
 public sealed record LogEventView(
     DateTimeOffset Timestamp, string Application, string Level, string Message, string? ExceptionType, string? ExceptionMessage,
-    string? TraceId, string? Fingerprint);
+    string? TraceId, string? Fingerprint, long Id);
+
+/// <summary>One log event in full, for the expanded row: everything the collector stored, plus the release it came from.</summary>
+public sealed record LogEventDetail(
+    long Id, DateTimeOffset Timestamp, string Application, string? Environment, string? Host, string Level, string Message,
+    string? ExceptionType, string? ExceptionMessage, string? StackTrace, string? TraceId, string? SpanId, string? Fingerprint,
+    string? PropertiesJson, string? Version, string? CommitSha);
 
 public sealed record FeedbackView(string Verdict, string? CorrectFingerprint, string? Comment, DateTimeOffset CreatedAt);
 
@@ -132,7 +138,7 @@ public sealed partial class PostgresDashboardStore(NpgsqlDataSource dataSource)
                 having bool_or(e.fingerprint = $2) and count(distinct e.fingerprint) > 1
                 order by max(e.timestamp) desc limit 1
             )
-            select timestamp, application, level, message, exception_type, exception_message, trace_id, fingerprint
+            select timestamp, application, level, message, exception_type, exception_message, trace_id, fingerprint, id
             from log_events where trace_id = (select trace_id from candidate)
             order by timestamp
             """);
@@ -144,7 +150,7 @@ public sealed partial class PostgresDashboardStore(NpgsqlDataSource dataSource)
     public async Task<IReadOnlyList<LogEventView>> RecentErrorsAsync(Guid incidentId, int limit = 25, CancellationToken ct = default)
     {
         await using var command = dataSource.CreateCommand("""
-            select timestamp, application, level, message, exception_type, exception_message, trace_id, fingerprint
+            select timestamp, application, level, message, exception_type, exception_message, trace_id, fingerprint, id
             from log_events
             where fingerprint in (select fingerprint from incident_groups where incident_id = $1)
             order by timestamp desc limit $2
@@ -204,10 +210,30 @@ public sealed partial class PostgresDashboardStore(NpgsqlDataSource dataSource)
         {
             result.Add(new LogEventView(
                 reader.GetFieldValue<DateTimeOffset>(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
-                NullableString(reader, 4), NullableString(reader, 5), NullableString(reader, 6), NullableString(reader, 7)));
+                NullableString(reader, 4), NullableString(reader, 5), NullableString(reader, 6), NullableString(reader, 7), reader.GetInt64(8)));
         }
 
         return result;
+    }
+
+    public async Task<LogEventDetail?> LogEventAsync(long id, CancellationToken ct = default)
+    {
+        await using var command = dataSource.CreateCommand("""
+            select e.id, e.timestamp, e.application, e.environment, e.host, e.level, e.message, e.exception_type, e.exception_message,
+                   e.stack_trace, e.trace_id, e.span_id, e.fingerprint, e.properties::text, d.version, d.commit_sha
+            from log_events e left join deployments d on d.id = e.deployment_id
+            where e.id = $1
+            """);
+        command.Parameters.Add(new() { Value = id });
+
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+            return null;
+        return new LogEventDetail(
+            reader.GetInt64(0), reader.GetFieldValue<DateTimeOffset>(1), reader.GetString(2), NullableString(reader, 3), NullableString(reader, 4),
+            reader.GetString(5), reader.GetString(6), NullableString(reader, 7), NullableString(reader, 8), NullableString(reader, 9),
+            NullableString(reader, 10), NullableString(reader, 11), NullableString(reader, 12), NullableString(reader, 13),
+            NullableString(reader, 14), NullableString(reader, 15));
     }
 
     private static string? NullableString(NpgsqlDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);

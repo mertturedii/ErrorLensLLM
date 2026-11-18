@@ -40,7 +40,7 @@ public sealed partial class PostgresDashboardStore
 {
     private const string ErrorLevels = "('Error', 'Fatal')";
 
-    private const string EventColumns = "timestamp, application, level, message, exception_type, exception_message, trace_id, fingerprint";
+    private const string EventColumns = "timestamp, application, level, message, exception_type, exception_message, trace_id, fingerprint, id";
 
     /// <summary>Bucket size that keeps a chart of <paramref name="span"/> at a few dozen bars.</summary>
     public static TimeSpan BucketFor(TimeSpan span) =>

@@ -1,0 +1,84 @@
+@* The expanded row under a log line: the event in full, loaded only when the row is opened *@
+@inject PostgresDashboardStore Store
+
+<tr class="log-detail">
+    <td colspan="@Columns">
+        @if (_detail is null)
+        {
+            <span class="muted small">@(_missing ? "Log bulunamadı." : "Yükleniyor…")</span>
+        }
+        else
+        {
+            var d = _detail;
+            <dl class="log-meta small">
+                <div><dt>Zaman</dt><dd>@d.Timestamp.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss.fff")</dd></div>
+                <div><dt>Seviye</dt><dd>@d.Level</dd></div>
+                <div><dt>Modül</dt><dd>@d.Application@(d.Environment is null ? "" : $" ({d.Environment})")</dd></div>
+                @if (d.Version is not null)
+                {
+                    <div><dt>Sürüm</dt><dd>@d.Version@(d.CommitSha is null ? "" : $" · {d.CommitSha}")</dd></div>
+                }
+                @if (d.Host is not null)
+                {
+                    <div><dt>Sunucu</dt><dd>@d.Host</dd></div>
+                }
+                @if (d.TraceId is not null)
+                {
+                    <div><dt>Trace</dt><dd><code>@d.TraceId</code>@(d.SpanId is null ? "" : $" / {d.SpanId}")</dd></div>
+                }
+                @if (d.Fingerprint is not null)
+                {
+                    <div><dt>Hata grubu</dt><dd><a href="hatalar/@d.Fingerprint">@d.Fingerprint[..Math.Min(12, d.Fingerprint.Length)]</a></dd></div>
+                }
+            </dl>
+
+            <div class="log-section">
+                <div class="muted small">Mesaj</div>
+                <pre class="stack">@d.Message</pre>
+            </div>
+            @if (d.ExceptionType is not null)
+            {
+                <div class="log-section">
+                    <div class="muted small">Exception</div>
+                    <pre class="stack">@d.ExceptionType: @d.ExceptionMessage</pre>
+                </div>
+            }
+            @if (d.StackTrace is not null)
+            {
+                <div class="log-section">
+                    <div class="muted small">Stack trace</div>
+                    <pre class="stack">@d.StackTrace</pre>
+                </div>
+            }
+            @if (d.PropertiesJson is not null && d.PropertiesJson != "{}")
+            {
+                <div class="log-section">
+                    <div class="muted small">Özellikler</div>
+                    <pre class="stack">@Pretty(d.PropertiesJson)</pre>
+                </div>
+            }
+        }
+    </td>
+</tr>
+
+@code {
+    [Parameter, EditorRequired] public long Id { get; set; }
+    [Parameter] public int Columns { get; set; } = 4;
+
+    private LogEventDetail? _detail;
+    private bool _missing;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_detail?.Id == Id)
+            return;
+        _detail = await Store.LogEventAsync(Id);
+        _missing = _detail is null;
+    }
+
+    private static string Pretty(string json)
+    {
+        try { return System.Text.Json.JsonSerializer.Serialize(System.Text.Json.JsonDocument.Parse(json), new System.Text.Json.JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }); }
+        catch (System.Text.Json.JsonException) { return json; }
+    }
+}

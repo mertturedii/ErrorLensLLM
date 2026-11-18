@@ -488,3 +488,16 @@ pre.stack {
     .tabs { max-width: 100%; overflow-x: auto; }
     .tabs button { padding: 5px 9px; }
 }
+
+/* ---------- Expandable log rows ---------- */
+
+tr.expandable { cursor: pointer; }
+tr.expandable:hover td { background: var(--surface-2); }
+tr.expandable.open td { background: var(--surface-2); }
+tr.log-detail > td { background: var(--surface-2); padding: 4px 14px 14px; }
+.log-meta { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 4px 0 10px; }
+.log-meta div { display: flex; gap: 6px; }
+.log-meta dt { color: var(--text-secondary); }
+.log-meta dd { margin: 0; word-break: break-all; }
+.log-section { margin-top: 8px; }
+.log-section pre.stack { background: var(--surface-1); white-space: pre-wrap; word-break: break-word; margin-top: 4px; }
