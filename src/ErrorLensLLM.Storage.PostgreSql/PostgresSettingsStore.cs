@@ -95,6 +95,15 @@ public sealed class PostgresSettingsStore(NpgsqlDataSource dataSource)
         await command.ExecuteNonQueryAsync(ct);
     }
 
+    /// <summary>Removes one stored value, so that it falls back to its default.</summary>
+    public async Task ResetSettingAsync(string section, string key, CancellationToken ct = default)
+    {
+        await using var command = dataSource.CreateCommand("delete from settings where section = $1 and key = $2");
+        command.Parameters.Add(new() { Value = section });
+        command.Parameters.Add(new() { Value = key });
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
     /// <summary>Removes the stored values of a section, so that it falls back to the defaults.</summary>
     public async Task ResetSectionAsync(string section, CancellationToken ct = default)
     {
@@ -241,6 +250,19 @@ public sealed class PostgresSettingsStore(NpgsqlDataSource dataSource)
         }
 
         return rows;
+    }
+
+    /// <summary>The latest request of each provider, for the status line on the settings screen.</summary>
+    public async Task<IReadOnlyDictionary<string, (DateTimeOffset At, string? Error)>> LatestRequestsAsync(CancellationToken ct = default)
+    {
+        await using var command = dataSource.CreateCommand("""
+            select distinct on (provider) provider, created_at, error from llm_requests order by provider, created_at desc
+            """);
+        var result = new Dictionary<string, (DateTimeOffset, string?)>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            result[reader.GetString(0)] = (reader.GetFieldValue<DateTimeOffset>(1), reader.IsDBNull(2) ? null : reader.GetString(2));
+        return result;
     }
 
     private static async Task<IReadOnlyList<LlmRequestRow>> ReadRequestsAsync(NpgsqlCommand command, CancellationToken ct)
