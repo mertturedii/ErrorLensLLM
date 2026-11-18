@@ -144,7 +144,7 @@ else if (_group is { } group)
                             <td class="nowrap">@Format.DateTime(e.Timestamp)</td>
                             <td><ModuleChip Name="@e.Application" /></td>
                             <td class="secondary">@(e.ExceptionMessage ?? e.Message)</td>
-                            <td class="hide-narrow"><code class="muted">@(e.TraceId?[..Math.Min(8, e.TraceId.Length)])</code></td>
+                            <td class="hide-narrow">@if (e.TraceId is not null) { <a href="izler/@e.TraceId" @onclick:stopPropagation="true"><code>@e.TraceId[..Math.Min(8, e.TraceId.Length)]</code></a> }</td>
                         </tr>
                         @if (_open.Contains(e.Id))
                         {

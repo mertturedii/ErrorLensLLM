@@ -1,0 +1,162 @@
+@page "/izler"
+@page "/izler/{TraceId}"
+@inherits RefreshingPage
+@inject PostgresDashboardStore Store
+@inject NavigationManager Navigation
+
+<PageTitle>İstek izi · ErrorLensLLM</PageTitle>
+
+<div class="crumb"><a href="izleme">← Log İzleme</a></div>
+
+<div class="page-head">
+    <div>
+        <h1>İstek izi</h1>
+        <div class="secondary" style="margin-top:6px">Bir isteğin servisler arasındaki yolu: aynı trace id'yi taşıyan bütün loglar, zaman sırasıyla.</div>
+    </div>
+    <form class="trace-search" @onsubmit="Go">
+        <input type="search" placeholder="Trace id" aria-label="Trace id" @bind="_input" />
+        <button type="submit" class="secondary">Aç</button>
+    </form>
+</div>
+
+@if (string.IsNullOrWhiteSpace(TraceId))
+{
+    <div class="card empty">Bir trace id gir ya da bir log satırındaki trace bağlantısına tıkla.</div>
+}
+else if (!_loaded)
+{
+    <div class="card empty">Yükleniyor…</div>
+}
+else if (_events.Count == 0)
+{
+    <div class="card empty">Bu trace id ile log bulunamadı.<div class="muted"><code>@TraceId</code></div></div>
+}
+else
+{
+    var first = _events[0];
+    var last = _events[^1];
+    var errors = _events.Where(IsError).ToList();
+    var firstError = errors.FirstOrDefault();
+
+    <div class="stats">
+        <Stat Label="Başlangıç" Value="@Format.TimeWithMs(first.Timestamp)" Hint="@Format.Stamp(first.Timestamp)" Text />
+        <Stat Label="Süre" Value="@Duration(last.Timestamp - first.Timestamp)" Hint="ilk ve son log arası" Text />
+        <Stat Label="Servis" Value="@_path.Count.ToString()" Hint="@string.Join(", ", _path)" />
+        <Stat Label="Log" Value="@_events.Count.ToString()" Hint="@(errors.Count == 0 ? "hata yok" : $"{errors.Count} hata")" />
+    </div>
+
+    <section class="card">
+        <h2>Servisler</h2>
+        <p class="muted small" style="margin:-4px 0 10px">İlk log yazdıkları sıraya göre. Bu, çağrı sırasıyla aynı olmayabilir: bir servis isteği alıp başka bir servise iletebilir ve logunu ancak cevap gelince yazabilir.</p>
+        <div class="trace-path">
+            @for (var i = 0; i < _path.Count; i++)
+            {
+                var app = _path[i];
+                var failed = errors.Any(e => e.Application == app);
+                var origin = firstError?.Application == app;
+                if (i > 0)
+                {
+                    <span class="arrow">→</span>
+                }
+                <span class="trace-step @(failed ? "failed" : "")">
+                    <ModuleChip Name="@app" />
+                    @if (origin)
+                    {
+                        <span class="badge bad"><span class="dot"></span>ilk hata</span>
+                    }
+                    else if (failed)
+                    {
+                        <span class="badge warn"><span class="dot"></span>hata</span>
+                    }
+                </span>
+            }
+        </div>
+        @if (firstError is { } fe)
+        {
+            <p class="small secondary" style="margin-top:10px">
+                İstek ilk olarak <strong>@fe.Application</strong> servisinde, başlangıçtan @Duration(fe.Timestamp - first.Timestamp) sonra hata verdi:
+                <code>@DashboardFormat.ShortType(fe.ExceptionType ?? "Error")</code> @(fe.ExceptionMessage ?? fe.Message)
+            </p>
+        }
+        else
+        {
+            <p class="small secondary" style="margin-top:10px">Bu istekte hata yok.</p>
+        }
+    </section>
+
+    <section class="card flush">
+        <h2>Loglar</h2>
+        <div class="scroll-x">
+            <table class="list">
+                <thead>
+                    <tr>
+                        <th>Zaman</th>
+                        <th>+ms</th>
+                        <th>Modül</th>
+                        <th>Mesaj</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var e in _events)
+                    {
+                        <tr class="expandable @(_open.Contains(e.Id) ? "open" : "") @(IsError(e) ? "row-error" : "")" @onclick="() => Toggle(e.Id)" title="Ayrıntılar için tıkla">
+                            <td class="num left nowrap">@Format.TimeWithMs(e.Timestamp)</td>
+                            <td class="num muted">@((e.Timestamp - first.Timestamp).TotalMilliseconds.ToString("0"))</td>
+                            <td><ModuleChip Name="@e.Application" /></td>
+                            <td>
+                                @e.Message
+                                @if (e.ExceptionType is not null)
+                                {
+                                    <div class="secondary small">@DashboardFormat.ShortType(e.ExceptionType) · @e.ExceptionMessage</div>
+                                }
+                            </td>
+                        </tr>
+                        @if (_open.Contains(e.Id))
+                        {
+                            <LogDetailRow Id="e.Id" Columns="4" />
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}
+
+@code {
+    [Parameter] public string? TraceId { get; set; }
+
+    private readonly HashSet<long> _open = [];
+    private IReadOnlyList<LogEventView> _events = [];
+    private List<string> _path = [];
+    private bool _loaded;
+    private string? _input;
+
+    protected override async Task LoadAsync()
+    {
+        _input ??= TraceId;
+        if (string.IsNullOrWhiteSpace(TraceId))
+            return;
+
+        _events = await Store.TraceAsync(TraceId, ct: Stopping);
+        // Services in the order of their first log; without parent span ids this is not necessarily the call order
+        _path = _events.Select(e => e.Application).Distinct().ToList();
+        _loaded = true;
+    }
+
+    private void Go()
+    {
+        if (!string.IsNullOrWhiteSpace(_input))
+            Navigation.NavigateTo($"izler/{Uri.EscapeDataString(_input.Trim())}");
+    }
+
+    private void Toggle(long id)
+    {
+        if (!_open.Remove(id))
+            _open.Add(id);
+    }
+
+    private static bool IsError(LogEventView e) => e.Level is "Error" or "Fatal";
+
+    private static string Duration(TimeSpan span) =>
+        span.TotalSeconds < 1 ? $"{span.TotalMilliseconds:0} ms" : span.TotalSeconds < 90 ? $"{span.TotalSeconds:0.0} sn" : $"{span.TotalMinutes:0.0} dk";
+}

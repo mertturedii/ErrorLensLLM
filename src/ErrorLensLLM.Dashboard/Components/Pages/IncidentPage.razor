@@ -188,7 +188,7 @@ else if (_incident is { } incident)
                     }
                     else
                     {
-                        <p class="muted small">Örnek bir isteğin modüller arasındaki izi · trace <code>@_trace[0].TraceId</code></p>
+                        <p class="muted small">Örnek bir isteğin modüller arasındaki izi · trace <a href="izler/@_trace[0].TraceId"><code>@_trace[0].TraceId</code></a> · <a href="izler/@_trace[0].TraceId">isteğin tüm yolunu aç →</a></p>
                         <ol class="trace">
                             @foreach (var e in _trace)
                             {
@@ -228,7 +228,7 @@ else if (_incident is { } incident)
                                             <strong>@DashboardFormat.ShortType(e.ExceptionType)</strong>
                                             <div class="secondary small">@(e.ExceptionMessage ?? e.Message)</div>
                                         </td>
-                                        <td class="hide-narrow"><code class="muted">@(e.TraceId?[..Math.Min(8, e.TraceId.Length)])</code></td>
+                                        <td class="hide-narrow">@if (e.TraceId is not null) { <a href="izler/@e.TraceId" @onclick:stopPropagation="true"><code>@e.TraceId[..Math.Min(8, e.TraceId.Length)]</code></a> }</td>
                                     </tr>
                                     @if (_open.Contains(e.Id))
                                     {

@@ -289,16 +289,28 @@ public sealed partial class PostgresDashboardStore
         return result;
     }
 
+    /// <summary>Every log of one request, across modules, in time order: how the request travelled and where it failed.</summary>
+    public async Task<IReadOnlyList<LogEventView>> TraceAsync(string traceId, int limit = 500, CancellationToken ct = default)
+    {
+        await using var command = dataSource.CreateCommand(
+            $"select {EventColumns} from log_events where trace_id = $1 order by timestamp, id limit $2");
+        command.Parameters.Add(new() { Value = traceId.Trim().ToLowerInvariant() });
+        command.Parameters.Add(new() { Value = limit });
+        return await ReadEventsAsync(command, ct);
+    }
+
     /// <summary>Latest logs of every level; all filters are optional.</summary>
     public async Task<IReadOnlyList<LogEventView>> RecentLogsAsync(
         DateTimeOffset since, string? application, string? level, string? search, int limit = 100, CancellationToken ct = default)
     {
         await using var command = dataSource.CreateCommand($"""
             select {EventColumns} from log_events
-            where timestamp >= $1
-              and ($2::text is null or application = $2)
+            where ($2::text is null or application = $2)
               and ($3::text is null or level = $3)
-              and ($4::text is null or message ilike '%' || $4 || '%' or exception_type ilike '%' || $4 || '%')
+              and (
+                  -- a trace id or a log id (#123) finds its logs whatever the time range
+                  ($4::text is not null and (trace_id = lower($4) or ($4 ~ '^#?[0-9]+$' and length($4) <= 19 and id = ltrim($4, '#')::bigint)))
+                  or (timestamp >= $1 and ($4::text is null or message ilike '%' || $4 || '%' or exception_type ilike '%' || $4 || '%')))
             order by timestamp desc limit $5
             """);
         command.Parameters.Add(new() { Value = since.ToUniversalTime() });

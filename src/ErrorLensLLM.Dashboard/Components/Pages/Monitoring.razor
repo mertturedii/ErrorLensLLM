@@ -249,7 +249,7 @@ else
             <h2>Son loglar</h2>
         </div>
         <div class="filters" style="padding:0 18px">
-            <input type="search" placeholder="Mesajda ara" aria-label="Mesajda ara" @bind="_search" @bind:after="ReloadAsync" />
+            <input type="search" placeholder="Mesaj, trace id ya da #log id" aria-label="Mesajda, trace id ya da log id ile ara" @bind="_search" @bind:after="ReloadAsync" />
             <select aria-label="Modül" @bind="_module" @bind:after="ReloadAsync">
                 <option value="">Tüm modüller</option>
                 @foreach (var module in _modules)
